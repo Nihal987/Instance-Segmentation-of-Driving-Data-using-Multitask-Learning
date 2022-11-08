@@ -118,14 +118,14 @@ def main():
         dist.init_process_group(backend='nccl', init_method='env://')  # distributed backend
     
     print("load model to device")
-    model = get_net(cfg).to(device)
+    model = get_net(cfg).to(device) #NEED TO CHANGE
     # print("load finished")
     #model = model.to(device)
     # print("finish build model")
     
 
     # define loss function (criterion) and optimizer
-    criterion = get_loss(cfg, device=device)
+    criterion = get_loss(cfg, model,device=device)
     optimizer = get_optimizer(cfg, model)
 
 
@@ -134,6 +134,7 @@ def main():
     best_model = False
     last_epoch = -1
 
+    #NEED TO CHANGE
     Encoder_para_idx = [str(i) for i in range(0, 17)]
     Det_Head_para_idx = [str(i) for i in range(17, 25)]
     Da_Seg_Head_para_idx = [str(i) for i in range(25, 34)]

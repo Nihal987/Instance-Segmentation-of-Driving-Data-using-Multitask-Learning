@@ -1,14 +1,17 @@
-import torch.nn as nn
 import torch
-from .general import bbox_iou
-from .postprocess import build_targets
+import torch.nn as nn
+import torch.nn.functional as F
+from .general import bbox_iou, in_bbox_iou
+from .general import xywh2xyxy, crop
+from .postprocess import build_targets, seg_build_targets
 from lib.core.evaluate import SegmentationMetric
+# from lib.utils.utils import de_parallel
 
 class MultiHeadLoss(nn.Module):
     """
     collect all the loss we need
     """
-    def __init__(self, losses, cfg, lambdas=None):
+    def __init__(self, losses, model, cfg, lambdas=None):
         """
         Inputs:
         - losses: (list)[nn.Module, nn.Module, ...]
@@ -16,16 +19,16 @@ class MultiHeadLoss(nn.Module):
         - lambdas: (list) + IoU loss, weight for each loss
         """
         super().__init__()
-        # lambdas: [cls, obj, iou, la_seg, ll_seg, ll_iou]
+        # lambdas: [cls, obj, iou, la_seg, ll_seg, ll_iou, in_cls, in_obj, in_iou, in_seg]
         if not lambdas:
-            lambdas = [1.0 for _ in range(len(losses) + 3)]
+            lambdas = [1.0 for _ in range(len(losses) + 5)]
         assert all(lam >= 0.0 for lam in lambdas)
 
         self.losses = nn.ModuleList(losses)
         self.lambdas = lambdas
         self.cfg = cfg
 
-    def forward(self, head_fields, head_targets, shapes, model):
+    def forward(self, head_fields, head_targets, shapes, model,masks):
         """
         Inputs:
         - head_fields: (list) output from each task head
@@ -47,16 +50,16 @@ class MultiHeadLoss(nn.Module):
         #                if l is not None]
         # total_loss = sum(loss_values) if loss_values else None
         # print(model.nc)
-        total_loss, head_losses = self._forward_impl(head_fields, head_targets, shapes, model)
+        total_loss, head_losses = self._forward_impl(head_fields, head_targets, shapes, model, masks)
 
         return total_loss, head_losses
 
-    def _forward_impl(self, predictions, targets, shapes, model):
+    def _forward_impl(self, predictions, targets, shapes, model, masks):
         """
 
         Args:
-            predictions: predicts of [[det_head1, det_head2, det_head3], drive_area_seg_head, lane_line_seg_head]
-            targets: gts [det_targets, segment_targets, lane_targets]
+            predictions: predicts of [[det_head1, det_head2, det_head3], drive_area_seg_head, lane_line_seg_head, in_det_head, in_seg_head(proto)]
+            targets: gts [det_targets, segment_targets, lane_targets, in_seg_targets]
             model:
 
         Returns:
@@ -64,29 +67,36 @@ class MultiHeadLoss(nn.Module):
             head_losses: list containing losses
 
         """
+
         cfg = self.cfg
         device = targets[0].device
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = build_targets(cfg, predictions[0], targets[0], model)  # targets
 
+        # Intance Segmentation parameters
+        in_lcls, in_lbox, in_lobj, in_lseg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
+        in_tcls, in_tbox, in_indices, in_anchors, in_tidxs, in_xywhn = seg_build_targets(cfg, predictions[3], targets[3], model)  # Instance Segmentation targets
+        bs, nm, mask_h, mask_w = predictions[4].shape  # batch size, number of masks, mask height, mask width
+
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
         cp, cn = smooth_BCE(eps=0.0)
+        cp_in,cn_in = smooth_BCE(eps=0.0)
 
-        BCEcls, BCEobj, BCEseg = self.losses
+        BCEcls, BCEobj, BCEseg, BCEcls_in, BCEobj_in = self.losses
 
         # Calculate Losses
-        nt = 0  # number of targets
         no = len(predictions[0])  # number of outputs
         balance = [4.0, 1.0, 0.4] if no == 3 else [4.0, 1.0, 0.4, 0.1]  # P3-5 or P3-6
+        nl = len(predictions[3])
+        in_balance = [4.0, 1.0, 0.4] if nl == 3 else [4.0, 1.0, 0.25, 0.06, 0.02]  # P3-P7
 
         # calculate detection loss
         for i, pi in enumerate(predictions[0]):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-            tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
+            in_tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
 
             n = b.shape[0]  # number of targets
             if n:
-                nt += n  # cumulative targets
                 ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
 
                 # Regression
@@ -97,7 +107,7 @@ class MultiHeadLoss(nn.Module):
                 lbox += (1.0 - iou).mean()  # iou loss
 
                 # Objectness
-                tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
+                in_tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * iou.detach().clamp(0).type(in_tobj.dtype)  # iou ratio
 
                 # Classification
                 # print(model.nc)
@@ -105,7 +115,48 @@ class MultiHeadLoss(nn.Module):
                     t = torch.full_like(ps[:, 5:], cn, device=device)  # targets
                     t[range(n), tcls[i]] = cp
                     lcls += BCEcls(ps[:, 5:], t)  # BCE
-            lobj += BCEobj(pi[..., 4], tobj) * balance[i]  # obj loss
+            lobj += BCEobj(pi[..., 4], in_tobj) * balance[i]  # obj loss
+
+        # Losses for Instance Segementation
+        for i, pi in enumerate(predictions[3]):  # layer index, layer predictions
+            b, a, gj, gi = in_indices[i]  # image, anchor, gridy, gridx
+            in_tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=device)  # target obj
+
+            n = b.shape[0]  # number of targets
+            if n:
+                pxy, pwh, _, pcls, pmask = pi[b, a, gj, gi].split((2, 2, 1, model.nc, nm), 1)  # subset of predictions
+                # Box regression
+                pxy = pxy.sigmoid() * 2 - 0.5
+                pwh = (pwh.sigmoid() * 2) ** 2 * in_anchors[i]
+                pbox = torch.cat((pxy, pwh), 1)  # predicted box
+                iou = in_bbox_iou(pbox, in_tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
+                in_lbox += (1.0 - iou).mean()  # iou loss
+
+                # Objectness
+                iou = iou.detach().clamp(0).type(in_tobj.dtype)
+                if model.gr < 1:
+                    iou = (1.0 - model.gr) + model.gr * iou
+                in_tobj[b, a, gj, gi] = iou  # iou ratio
+
+                # Classification
+                if model.nc > 1:  # cls loss (only if multiple classes)
+                    t = torch.full_like(pcls, cn_in, device=device)  # targets
+                    t[range(n), in_tcls[i]] = cp_in
+                    in_lcls += BCEcls_in(pcls, t)  # BCE
+
+                # Mask regression
+                if tuple(masks.shape[-2:]) != (mask_h, mask_w):  # downsample
+                    masks = F.interpolate(masks[None], (mask_h, mask_w), mode="bilinear", align_corners=False)[0]
+                marea = in_xywhn[i][:, 2:].prod(1)  # mask width, height normalized
+                mxyxy = xywh2xyxy(in_xywhn[i] * torch.tensor([mask_w, mask_h, mask_w, mask_h], device=device))
+                for bi in b.unique():
+                    j = b == bi  # matching index
+                    mask_gti = torch.where(masks[bi][None] == in_tidxs[i][j].view(-1, 1, 1), 1.0, 0.0)
+                    in_lseg += self.single_mask_loss(mask_gti, pmask[j], predictions[4][bi], mxyxy[j], marea[j],nm)
+
+            obji = BCEobj_in(pi[..., 4], in_tobj)
+            in_lobj += obji * in_balance[i]  # obj loss
+
 
         drive_area_seg_predicts = predictions[1].view(-1)
         drive_area_seg_targets = targets[1].view(-1)
@@ -133,6 +184,11 @@ class MultiHeadLoss(nn.Module):
         lcls *= cfg.LOSS.CLS_GAIN * s * self.lambdas[0]
         lobj *= cfg.LOSS.OBJ_GAIN * s * (1.4 if no == 4 else 1.) * self.lambdas[1]
         lbox *= cfg.LOSS.BOX_GAIN * s * self.lambdas[2]
+
+        in_lcls *= cfg.LOSS.IN_CLS_GAIN * self.lambdas[6]
+        in_lobj *= cfg.LOSS.IN_OBJ_GAIN * self.lambdas[7]
+        in_lbox *= cfg.LOSS.IN_BOX_GAIN * self.lambdas[8]
+        in_lseg *= (cfg.LOSS.IN_BOX_GAIN* self.lambdas[9])/bs
 
         lseg_da *= cfg.LOSS.DA_SEG_GAIN * self.lambdas[3]
         lseg_ll *= cfg.LOSS.LL_SEG_GAIN * self.lambdas[4]
@@ -162,13 +218,19 @@ class MultiHeadLoss(nn.Module):
             lseg_ll = 0 * lseg_ll
             liou_ll = 0 * liou_ll
 
-        loss = lbox + lobj + lcls + lseg_da + lseg_ll + liou_ll
+        loss = lbox + lobj + lcls + lseg_da + lseg_ll + liou_ll + in_lcls + in_lobj + in_lbox + in_lseg 
         # loss = lseg
         # return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
-        return loss, (lbox.item(), lobj.item(), lcls.item(), lseg_da.item(), lseg_ll.item(), liou_ll.item(), loss.item())
+        return loss, (lbox.item(), lobj.item(), lcls.item(), lseg_da.item(), lseg_ll.item(), liou_ll.item(), in_lcls.item(), in_lobj.item(), in_lbox.item(), in_lseg.item(), loss.item())
+
+    def single_mask_loss(self, gt_mask, pred, proto, xyxy, area,nm):
+        # Mask loss for one image
+        pred_mask = (pred @ proto.view(nm, -1)).view(-1, *proto.shape[1:])  # (n,32) @ (32,80,80) -> (n,80,80)
+        loss = F.binary_cross_entropy_with_logits(pred_mask, gt_mask, reduction="none")
+        return (crop(loss, xyxy).mean(dim=(1, 2)) / area).mean()
 
 
-def get_loss(cfg, device):
+def get_loss(cfg, model, device):
     """
     get MultiHeadLoss
 
@@ -187,13 +249,18 @@ def get_loss(cfg, device):
     BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([cfg.LOSS.OBJ_POS_WEIGHT])).to(device)
     # segmentation loss criteria
     BCEseg = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([cfg.LOSS.SEG_POS_WEIGHT])).to(device)
+    # in_seg class loss criteria
+    BCEcls_in = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([cfg.LOSS.CLS_POS_WEIGHT])).to(device)
+    # in_seg object loss criteria
+    BCEobj_in = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([cfg.LOSS.OBJ_POS_WEIGHT])).to(device)
     # Focal loss
     gamma = cfg.LOSS.FL_GAMMA  # focal loss gamma
     if gamma > 0:
         BCEcls, BCEobj = FocalLoss(BCEcls, gamma), FocalLoss(BCEobj, gamma)
+        BCEcls_in, BCEobj_in = FocalLoss(BCEcls_in, gamma), FocalLoss(BCEobj_in, gamma)
 
-    loss_list = [BCEcls, BCEobj, BCEseg]
-    loss = MultiHeadLoss(loss_list, cfg=cfg, lambdas=cfg.LOSS.MULTI_HEAD_LAMBDA)
+    loss_list = [BCEcls, BCEobj, BCEseg, BCEcls_in, BCEobj_in]
+    loss = MultiHeadLoss(loss_list, model,cfg=cfg,lambdas=cfg.LOSS.MULTI_HEAD_LAMBDA)
     return loss
 
 # example

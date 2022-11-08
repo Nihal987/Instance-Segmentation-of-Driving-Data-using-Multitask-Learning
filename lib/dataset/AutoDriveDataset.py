@@ -9,6 +9,8 @@ from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 from ..utils import letterbox, augment_hsv, random_perspective, xyxy2xywh, cutout
+from ..core.general import xyn2xy, xywhn2xyxy, xyxy2xywhn
+from ..utils.augmentations import polygons2masks,polygons2masks_overlap
 
 
 class AutoDriveDataset(Dataset):
@@ -36,6 +38,7 @@ class AutoDriveDataset(Dataset):
         label_root = Path(cfg.DATASET.LABELROOT)
         mask_root = Path(cfg.DATASET.MASKROOT)
         lane_root = Path(cfg.DATASET.LANEROOT)
+        in_mask_root = Path(cfg.DATASET.INS_MASKROOT)
         if is_train:
             indicator = cfg.DATASET.TRAIN_SET
         else:
@@ -44,6 +47,7 @@ class AutoDriveDataset(Dataset):
         self.label_root = label_root / indicator
         self.mask_root = mask_root / indicator
         self.lane_root = lane_root / indicator
+        self.in_mask_root = in_mask_root/indicator
         # self.label_list = self.label_root.iterdir()
         self.mask_list = self.mask_root.iterdir()
 
@@ -55,6 +59,8 @@ class AutoDriveDataset(Dataset):
         self.rotation_factor = cfg.DATASET.ROT_FACTOR
         self.flip = cfg.DATASET.FLIP
         self.color_rgb = cfg.DATASET.COLOR_RGB
+        self.overlap = cfg.DATASET.OVERLAP
+        self.downsample_ratio = cfg.DATASET.DOWNSAMPLE_RATIO
 
         # self.target_type = cfg.MODEL.TARGET_TYPE
         self.shapes = np.array(cfg.DATASET.ORG_IMG_SIZE)
@@ -89,6 +95,7 @@ class AutoDriveDataset(Dataset):
         Returns:
         -image: transformed image, first passed the data augmentation in __getitem__ function(type:numpy), then apply self.transform
         -target: ground truth(det_gt,seg_gt)
+        -masks
 
         function maybe useful
         cv2.imread
@@ -97,7 +104,7 @@ class AutoDriveDataset(Dataset):
         """
         data = self.db[idx]
         img = cv2.imread(data["image"], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         # seg_label = cv2.imread(data["mask"], 0)
         if self.cfg.num_seg_class == 3:
             seg_label = cv2.imread(data["mask"])
@@ -135,12 +142,28 @@ class AutoDriveDataset(Dataset):
             labels[:, 2] = ratio[1] * h * (det_label[:, 2] - det_label[:, 4] / 2) + pad[1]  # pad height
             labels[:, 3] = ratio[0] * w * (det_label[:, 1] + det_label[:, 3] / 2) + pad[0]
             labels[:, 4] = ratio[1] * h * (det_label[:, 2] + det_label[:, 4] / 2) + pad[1]
+        
+        in_labels = data["in_label"]        
+        segments = data["in_segments"]
+        if len(segments):
+                for i_s in range(len(segments)):
+                    segments[i_s] = xyn2xy(
+                        segments[i_s],
+                        ratio[0] * w,
+                        ratio[1] * h,
+                        padw=pad[0],
+                        padh=pad[1],
+                    )
+        if in_labels.size:  # normalized xywh to pixel xyxy format
+            in_labels[:, 1:] = xywhn2xyxy(in_labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
             
         if self.is_train:
             combination = (img, seg_label, lane_label)
-            (img, seg_label, lane_label), labels = random_perspective(
+            (img, seg_label, lane_label), labels, in_labels, segments = random_perspective(
                 combination=combination,
+                in_labels = in_labels,
                 targets=labels,
+                segments=segments,
                 degrees=self.cfg.DATASET.ROT_FACTOR,
                 translate=self.cfg.DATASET.TRANSLATE,
                 scale=self.cfg.DATASET.SCALE_FACTOR,
@@ -157,6 +180,22 @@ class AutoDriveDataset(Dataset):
                 # Normalize coordinates 0 - 1
                 labels[:, [2, 4]] /= img.shape[0]  # height
                 labels[:, [1, 3]] /= img.shape[1]  # width
+            
+            nl = len(in_labels)  # number of labels
+            if nl:
+                in_labels[:, 1:5] = xyxy2xywhn(in_labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1e-3)
+                if self.overlap:
+                    masks, sorted_idx = polygons2masks_overlap(img.shape[:2],
+                                                            segments,
+                                                            downsample_ratio=self.downsample_ratio)
+                    masks = masks[None]  # (640, 640) -> (1, 640, 640)
+                    in_labels = in_labels[sorted_idx]
+                else:
+                    masks = polygons2masks(img.shape[:2], segments, color=1, downsample_ratio=self.downsample_ratio)
+
+            masks = (torch.from_numpy(masks) if len(masks) else torch.zeros(1 if self.overlap else nl, img.shape[0] //
+                                                                        self.downsample_ratio, img.shape[1] //
+                                                                        self.downsample_ratio))
 
             # if self.is_train:
             # random left-right flip
@@ -167,15 +206,19 @@ class AutoDriveDataset(Dataset):
                 lane_label = np.fliplr(lane_label)
                 if len(labels):
                     labels[:, 1] = 1 - labels[:, 1]
+                    in_labels[:, 1] = 1 - in_labels[:, 1]
+                    masks = torch.flip(masks, dims=[2])
 
             # random up-down flip
-            ud_flip = False
+            ud_flip = True
             if ud_flip and random.random() < 0.5:
                 img = np.flipud(img)
-                seg_label = np.filpud(seg_label)
-                lane_label = np.filpud(lane_label)
+                seg_label = np.flipud(seg_label)
+                lane_label = np.flipud(lane_label)
                 if len(labels):
                     labels[:, 2] = 1 - labels[:, 2]
+                    in_labels[:, 2] = 1 - in_labels[:, 2]
+                    masks = torch.flip(masks, dims=[1])
         
         else:
             if len(labels):
@@ -184,11 +227,31 @@ class AutoDriveDataset(Dataset):
 
                 # Normalize coordinates 0 - 1
                 labels[:, [2, 4]] /= img.shape[0]  # height
-                labels[:, [1, 3]] /= img.shape[1]  # width
+                labels[:, [1, 3]] /= img.shape[1]  # width 
+            
+            nl = len(in_labels)  # number of labels
+            if nl:
+                in_labels[:, 1:5] = xyxy2xywhn(in_labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1e-3)
+                if self.overlap:
+                    masks, sorted_idx = polygons2masks_overlap(img.shape[:2],
+                                                            segments,
+                                                            downsample_ratio=self.downsample_ratio)
+                    masks = masks[None]  # (640, 640) -> (1, 640, 640)
+                    in_labels = in_labels[sorted_idx]
+                else:
+                    masks = polygons2masks(img.shape[:2], segments, color=1, downsample_ratio=self.downsample_ratio)
+
+            masks = (torch.from_numpy(masks) if len(masks) else torch.zeros(1 if self.overlap else nl, img.shape[0] //
+                                                                        self.downsample_ratio, img.shape[1] //
+                                                                        self.downsample_ratio))
 
         labels_out = torch.zeros((len(labels), 6))
         if len(labels):
             labels_out[:, 1:] = torch.from_numpy(labels)
+
+        in_labels_out = torch.zeros((nl, 6))
+        if nl:
+            in_labels_out[:, 1:] = torch.from_numpy(in_labels)
         # Convert
         # img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         # img = img.transpose(2, 0, 1)
@@ -232,10 +295,10 @@ class AutoDriveDataset(Dataset):
         # _ = show_seg_result(img, gt_mask, idx, 0, save_dir='debug', is_gt=True)
         
 
-        target = [labels_out, seg_label, lane_label]
+        target = [labels_out, seg_label, lane_label, in_labels_out]
         img = self.transform(img)
 
-        return img, target, data["image"], shapes
+        return img, target, data["image"], shapes, masks
 
     def select_data(self, db):
         """
@@ -252,13 +315,16 @@ class AutoDriveDataset(Dataset):
 
     @staticmethod
     def collate_fn(batch):
-        img, label, paths, shapes= zip(*batch)
-        label_det, label_seg, label_lane = [], [], []
+        img, label, paths, shapes, masks= zip(*batch)
+        label_det, label_seg, label_lane, in_label_seg = [], [], [], []
+        batched_masks = torch.cat(masks, 0)
         for i, l in enumerate(label):
-            l_det, l_seg, l_lane = l
+            l_det, l_seg, l_lane, in_l_seg = l
             l_det[:, 0] = i  # add target image index for build_targets()
+            in_l_seg[:, 0] = i  # add target image index for build_targets()
             label_det.append(l_det)
             label_seg.append(l_seg)
             label_lane.append(l_lane)
-        return torch.stack(img, 0), [torch.cat(label_det, 0), torch.stack(label_seg, 0), torch.stack(label_lane, 0)], paths, shapes
+            in_label_seg.append(in_l_seg)
+        return torch.stack(img, 0), [torch.cat(label_det, 0), torch.stack(label_seg, 0), torch.stack(label_lane, 0), torch.stack(in_label_seg, 0)], paths, shapes, batched_masks
 

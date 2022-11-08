@@ -4,6 +4,8 @@ import json
 from .AutoDriveDataset import AutoDriveDataset
 from .convert import convert, id_dict, id_dict_single
 from tqdm import tqdm
+from os.path import exists
+from ..core.general import segments2boxes
 
 single_cls = True       # just detect vehicle
 
@@ -24,15 +26,21 @@ class BddDataset(AutoDriveDataset):
                 a: (dictionary){'image':, 'information':, ......}
         image: image path
         mask: path of the segmetation label
-        label: [cls_id, center_x//256, center_y//256, w//256, h//256] 256=IMAGE_SIZE
+        label: [cls_id, segmentation2box] 
+        in_seg_mask: poly2D seg format
         """
         print('building database...')
         gt_db = []
         height, width = self.shapes
         for mask in tqdm(list(self.mask_list)):
             mask_path = str(mask)
+            if mask_path == 'bdd_small/da_seg_annotations/train/.DS_Store':
+                continue
             label_path = mask_path.replace(str(self.mask_root), str(self.label_root)).replace(".png", ".json")
             image_path = mask_path.replace(str(self.mask_root), str(self.img_root)).replace(".png", ".jpg")
+            in_mask_path = mask_path.replace(str(self.mask_root), str(self.in_mask_root)).replace(".png", ".txt")
+            if not exists(image_path):
+                continue
             lane_path = mask_path.replace(str(self.mask_root), str(self.lane_root))
             with open(label_path, 'r') as f:
                 label = json.load(f)
@@ -55,13 +63,36 @@ class BddDataset(AutoDriveDataset):
                     gt[idx][0] = cls_id
                     box = convert((width, height), (x1, x2, y1, y2))
                     gt[idx][1:] = list(box)
+
+            with open(in_mask_path, 'r') as f:
+                lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
+                if any(len(x) > 6 for x in lb):  # is segment
+                    classes = np.array([x[0] for x in lb], dtype=np.float32)
+                    segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
+                    lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
+                lb = np.array(lb, dtype=np.float32)
+            nl = len(lb)
+            if nl:
+                assert lb.shape[1] == 5, f'labels require 5 columns, {lb.shape[1]} columns detected'
+                assert (lb >= 0).all(), f'negative label values {lb[lb < 0]}'
+                assert (lb[:, 1:] <= 1).all(), f'non-normalized or out of bounds coordinates {lb[:, 1:][lb[:, 1:] > 1]}'
+                # _, i = np.unique(lb, axis=0, return_index=True)
+                # if len(i) < nl:  # duplicate row check
+                #     lb = lb[i]  # remove duplicates
+                #     if segments:
+                #         #segments = segments[i]
+                #         segments = [segments[x] for x in i]
+                #     msg = f'WARNING: {image_path}: {nl - len(i)} duplicate labels removed'
+                #     print(msg)
                 
 
             rec = [{
                 'image': image_path,
                 'label': gt,
+                'in_label': lb,
                 'mask': mask_path,
-                'lane': lane_path
+                'lane': lane_path,
+                'in_segments': segments
             }]
 
             gt_db += rec

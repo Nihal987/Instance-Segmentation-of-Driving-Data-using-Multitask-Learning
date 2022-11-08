@@ -2,7 +2,7 @@ import time
 from lib.core.evaluate import ConfusionMatrix,SegmentationMetric
 from lib.core.general import non_max_suppression,check_img_size,scale_coords,xyxy2xywh,xywh2xyxy,box_iou,coco80_to_coco91_class,plot_images,ap_per_class,output_to_target
 from lib.utils.utils import time_synchronized
-from lib.utils import plot_img_and_mask,plot_one_box,show_seg_result
+from lib.utils.plot import plot_one_box,show_seg_result
 import torch
 from threading import Thread
 import numpy as np
@@ -48,7 +48,7 @@ def train(cfg, train_loader, model, criterion, optimizer, scaler, epoch, num_bat
     # switch to train mode
     model.train()
     start = time.time()
-    for i, (input, target, paths, shapes) in enumerate(train_loader):
+    for i, (input, target, paths, shapes, masks) in enumerate(train_loader):
         intermediate = time.time()
         #print('tims:{}'.format(intermediate-start))
         num_iter = i + num_batch * (epoch - 1)
@@ -74,7 +74,7 @@ def train(cfg, train_loader, model, criterion, optimizer, scaler, epoch, num_bat
             target = assign_target
         with amp.autocast(enabled=device.type != 'cpu'):
             outputs = model(input)
-            total_loss, head_losses = criterion(outputs, target, shapes,model)
+            total_loss, head_losses = criterion(outputs, target, shapes, model, masks)
             # print(head_losses)
 
         # compute gradient and do update step
