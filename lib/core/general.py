@@ -24,6 +24,54 @@ from PIL import Image
 from scipy.cluster.vq import kmeans
 from scipy.signal import butter, filtfilt
 from tqdm import tqdm
+from core import TryExcept
+
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[1]  # root directory
+
+def is_ascii(s=''):
+    # Is string composed of all ASCII (no UTF) characters? (note str().isascii() introduced in python 3.7)
+    s = str(s)  # convert list, tuple, None, etc. to str
+    return len(s.encode().decode('ascii', 'ignore')) == len(s)
+
+def is_writeable(dir, test=False):
+    # Return True if directory has write permissions, test opening a file with write permissions if test=True
+    if not test:
+        return os.access(dir, os.W_OK)  # possible issues on Windows
+    file = Path(dir) / 'tmp.txt'
+    try:
+        with open(file, 'w'):  # open file with write permissions
+            pass
+        file.unlink()  # remove file
+        return True
+    except OSError:
+        return False
+
+def colorstr(*input):
+    # Colors a string https://en.wikipedia.org/wiki/ANSI_escape_code, i.e.  colorstr('blue', 'hello world')
+    *args, string = input if len(input) > 1 else ('blue', 'bold', input[0])  # color arguments, string
+    colors = {
+        'black': '\033[30m',  # basic colors
+        'red': '\033[31m',
+        'green': '\033[32m',
+        'yellow': '\033[33m',
+        'blue': '\033[34m',
+        'magenta': '\033[35m',
+        'cyan': '\033[36m',
+        'white': '\033[37m',
+        'bright_black': '\033[90m',  # bright colors
+        'bright_red': '\033[91m',
+        'bright_green': '\033[92m',
+        'bright_yellow': '\033[93m',
+        'bright_blue': '\033[94m',
+        'bright_magenta': '\033[95m',
+        'bright_cyan': '\033[96m',
+        'bright_white': '\033[97m',
+        'end': '\033[0m',  # misc
+        'bold': '\033[1m',
+        'underline': '\033[4m'}
+    return ''.join(colors[x] for x in args) + f'{string}' + colors['end']
+
 
 def crop(masks, boxes):
     """
@@ -127,6 +175,38 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=
         return iou  # IoU
 
 
+def mask_iou(mask1, mask2, eps=1e-7):
+    """
+    mask1: [N, n] m1 means number of predicted objects
+    mask2: [M, n] m2 means number of gt objects
+    Note: n means image_w x image_h
+
+    return: masks iou, [N, M]
+    """
+    intersection = torch.matmul(mask1, mask2.t()).clamp(0)
+    union = (mask1.sum(1)[:, None] + mask2.sum(1)[None]) - intersection  # (area1 + area2) - intersection
+    return intersection / (union + eps)
+
+def in_box_iou(box1, box2, eps=1e-7):
+    # https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
+    """
+    Return intersection-over-union (Jaccard index) of boxes.
+    Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
+    Arguments:
+        box1 (Tensor[N, 4])
+        box2 (Tensor[M, 4])
+    Returns:
+        iou (Tensor[N, M]): the NxM matrix containing the pairwise
+            IoU values for every element in boxes1 and boxes2
+    """
+
+    # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
+    (a1, a2), (b1, b2) = box1[:, None].chunk(2, 2), box2.chunk(2, 1)
+    inter = (torch.min(a2, b2) - torch.max(a1, b1)).clamp(0).prod(2)
+
+    # IoU = inter / (area1 + area2 - inter)
+    return inter / (box_area(box1.T)[:, None] + box_area(box2.T) - inter + eps)
+
 def box_iou(box1, box2):
     # https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
     """
@@ -150,6 +230,131 @@ def box_iou(box1, box2):
     # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
     inter = (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
     return inter / (area1[:, None] + area2 - inter)  # iou = inter / (area1 + area2 - inter)
+
+def process_mask_upsample(protos, masks_in, bboxes, shape):
+    """
+    Crop after upsample.
+    proto_out: [mask_dim, mask_h, mask_w]
+    out_masks: [n, mask_dim], n is number of masks after nms
+    bboxes: [n, 4], n is number of masks after nms
+    shape:input_image_size, (h, w)
+
+    return: h, w, n
+    """
+
+    c, mh, mw = protos.shape  # CHW
+    masks = (masks_in @ protos.float().view(c, -1)).sigmoid().view(-1, mh, mw)
+    masks = F.interpolate(masks[None], shape, mode='bilinear', align_corners=False)[0]  # CHW
+    masks = crop(masks, bboxes)  # CHW
+    return masks.gt_(0.5)
+
+def in_non_max_suppression(
+        prediction,
+        conf_thres=0.25,
+        iou_thres=0.45,
+        classes=None,
+        agnostic=False,
+        multi_label=False,
+        labels=(),
+        max_det=300,
+        nm=0,  # number of masks
+):
+    """Non-Maximum Suppression (NMS) on inference results to reject overlapping detections
+
+    Returns:
+         list of detections, on (n,6) tensor per image [xyxy, conf, cls]
+    """
+
+    bs = prediction.shape[0]  # batch size
+    nc = prediction.shape[2] - nm - 5  # number of classes
+    xc = prediction[..., 4] > conf_thres  # candidates
+
+    # Checks
+    assert 0 <= conf_thres <= 1, f'Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0'
+    assert 0 <= iou_thres <= 1, f'Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0'
+
+    # Settings
+    # min_wh = 2  # (pixels) minimum box width and height
+    max_wh = 7680  # (pixels) maximum box width and height
+    max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
+    time_limit = 0.5 + 0.05 * bs  # seconds to quit after
+    redundant = True  # require redundant detections
+    multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
+    merge = False  # use merge-NMS
+
+    t = time.time()
+    mi = 5 + nc  # mask start index
+    output = [torch.zeros((0, 6 + nm), device=prediction.device)] * bs
+    for xi, x in enumerate(prediction):  # image index, image inference
+        # Apply constraints
+        # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height
+        x = x[xc[xi]]  # confidence
+
+        # Cat apriori labels if autolabelling
+        if labels and len(labels[xi]):
+            lb = labels[xi]
+            v = torch.zeros((len(lb), nc + nm + 5), device=x.device)
+            v[:, :4] = lb[:, 1:5]  # box
+            v[:, 4] = 1.0  # conf
+            v[range(len(lb)), lb[:, 0].long() + 5] = 1.0  # cls
+            x = torch.cat((x, v), 0)
+
+        # If none remain process next image
+        if not x.shape[0]:
+            continue
+
+        # Compute conf
+        x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf
+
+        # Box/Mask
+        box = xywh2xyxy(x[:, :4])  # center_x, center_y, width, height) to (x1, y1, x2, y2)
+        mask = x[:, mi:]  # zero columns if no masks
+
+        # Detections matrix nx6 (xyxy, conf, cls)
+        if multi_label:
+            i, j = (x[:, 5:mi] > conf_thres).nonzero(as_tuple=False).T
+            x = torch.cat((box[i], x[i, 5 + j, None], j[:, None].float(), mask[i]), 1)
+        else:  # best class only
+            conf, j = x[:, 5:mi].max(1, keepdim=True)
+            x = torch.cat((box, conf, j.float(), mask), 1)[conf.view(-1) > conf_thres]
+
+        # Filter by class
+        if classes is not None:
+            x = x[(x[:, 5:6] == torch.tensor(classes, device=x.device)).any(1)]
+
+        # Apply finite constraint
+        # if not torch.isfinite(x).all():
+        #     x = x[torch.isfinite(x).all(1)]
+
+        # Check shape
+        n = x.shape[0]  # number of boxes
+        if not n:  # no boxes
+            continue
+        elif n > max_nms:  # excess boxes
+            x = x[x[:, 4].argsort(descending=True)[:max_nms]]  # sort by confidence
+        else:
+            x = x[x[:, 4].argsort(descending=True)]  # sort by confidence
+
+        # Batched NMS
+        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
+        boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
+        i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        if i.shape[0] > max_det:  # limit detections
+            i = i[:max_det]
+        if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
+            # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
+            iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
+            weights = iou * scores[None]  # box weights
+            x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim=True)  # merged boxes
+            if redundant:
+                i = i[iou.sum(1) > 1]  # require redundancy
+
+        output[xi] = x[i]
+        if (time.time() - t) > time_limit:
+            print(f'WARNING: NMS time limit {time_limit:.3f}s exceeded')
+            break  # time limit exceeded
+
+    return output
 
 def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, labels=()):
     """Performs Non-Maximum Suppression (NMS) on inference results
@@ -291,6 +496,15 @@ def resample_segments(segments, n=1000):
         segments[i] = np.concatenate([np.interp(x, xp, s[:, i]) for i in range(2)]).reshape(2, -1).T  # segment xy
     return segments
 
+def in_xywh2xyxy(x):
+    # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
+    y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
+    y[:, 2] = x[:, 2] - x[:, 0]  # width
+    y[:, 3] = x[:, 3] - x[:, 1]  # height
+    return y
+
 def xywh2xyxy(x):
     # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
     y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
@@ -304,6 +518,11 @@ def fitness(x):
     # Returns fitness (for use with results.txt or evolve.txt)
     w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
     return (x[:, :4] * w).sum(1)
+
+def in_fitness(x):
+    # Model fitness as a weighted combination of metrics
+    w = [0.0, 0.0, 0.1, 0.9, 0.0, 0.0, 0.1, 0.9]
+    return (x[:, :8] * w).sum(1)
 
 def check_img_size(img_size, s=32):
     # Verify img_size is a multiple of stride s
@@ -341,6 +560,15 @@ def clip_coords(boxes, shape):
 def make_divisible(x, divisor):
     # Returns x evenly divisible by divisor
     return math.ceil(x / divisor) * divisor
+
+def in_xyxy2xywh(x):
+    # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
+    y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
+    y[:, 2] = x[:, 2] - x[:, 0]  # width
+    y[:, 3] = x[:, 3] - x[:, 1]  # height
+    return y
 
 def xyxy2xywh(x):
     # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
@@ -448,6 +676,127 @@ def color_list():
         return tuple(int(str(h[1 + i:1 + i + 2]), 16) for i in (0, 2, 4))
 
     return [hex2rgb(h) for h in plt.rcParams['axes.prop_cycle'].by_key()['color']]
+
+def ap_per_class_box_and_mask(
+        tp_m,
+        tp_b,
+        conf,
+        pred_cls,
+        target_cls,
+        plot=False,
+        save_dir=".",
+        names=(),
+):
+    """
+    Args:
+        tp_b: tp of boxes.
+        tp_m: tp of masks.
+        other arguments see `func: ap_per_class`.
+    """
+    results_boxes = in_ap_per_class(tp_b,
+                                 conf,
+                                 pred_cls,
+                                 target_cls,
+                                 plot=plot,
+                                 save_dir=save_dir,
+                                 names=names,
+                                 prefix="Box")[2:]
+    results_masks = in_ap_per_class(tp_m,
+                                 conf,
+                                 pred_cls,
+                                 target_cls,
+                                 plot=plot,
+                                 save_dir=save_dir,
+                                 names=names,
+                                 prefix="Mask")[2:]
+
+    results = {
+        "boxes": {
+            "p": results_boxes[0],
+            "r": results_boxes[1],
+            "ap": results_boxes[3],
+            "f1": results_boxes[2],
+            "ap_class": results_boxes[4]},
+        "masks": {
+            "p": results_masks[0],
+            "r": results_masks[1],
+            "ap": results_masks[3],
+            "f1": results_masks[2],
+            "ap_class": results_masks[4]}}
+    return results
+
+def in_ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', names=(), eps=1e-16, prefix=""):
+    """ Compute the average precision, given the recall and precision curves.
+    Source: https://github.com/rafaelpadilla/Object-Detection-Metrics.
+    # Arguments
+        tp:  True positives (nparray, nx1 or nx10).
+        conf:  Objectness value from 0-1 (nparray).
+        pred_cls:  Predicted object classes (nparray).
+        target_cls:  True object classes (nparray).
+        plot:  Plot precision-recall curve at mAP@0.5
+        save_dir:  Plot save directory
+    # Returns
+        The average precision as computed in py-faster-rcnn.
+    """
+
+    # Sort by objectness
+    i = np.argsort(-conf)
+    tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
+
+    # Find unique classes
+    unique_classes, nt = np.unique(target_cls, return_counts=True)
+    nc = unique_classes.shape[0]  # number of classes, number of detections
+
+    # Create Precision-Recall curve and compute AP for each class
+    px, py = np.linspace(0, 1, 1000), []  # for plotting
+    ap, p, r = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
+    for ci, c in enumerate(unique_classes):
+        i = pred_cls == c
+        n_l = nt[ci]  # number of labels
+        n_p = i.sum()  # number of predictions
+        if n_p == 0 or n_l == 0:
+            continue
+
+        # Accumulate FPs and TPs
+        fpc = (1 - tp[i]).cumsum(0)
+        tpc = tp[i].cumsum(0)
+
+        # Recall
+        recall = tpc / (n_l + eps)  # recall curve
+        r[ci] = np.interp(-px, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
+
+        # Precision
+        precision = tpc / (tpc + fpc)  # precision curve
+        p[ci] = np.interp(-px, -conf[i], precision[:, 0], left=1)  # p at pr_score
+
+        # AP from recall-precision curve
+        for j in range(tp.shape[1]):
+            ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
+            if plot and j == 0:
+                py.append(np.interp(px, mrec, mpre))  # precision at mAP@0.5
+
+    # Compute F1 (harmonic mean of precision and recall)
+    f1 = 2 * p * r / (p + r + eps)
+    names = [v for k, v in names.items() if k in unique_classes]  # list: only classes that have data
+    names = dict(enumerate(names))  # to dict
+    if plot:
+        plot_pr_curve(px, py, ap, Path(save_dir) / f'{prefix}PR_curve.png', names)
+        plot_mc_curve(px, f1, Path(save_dir) / f'{prefix}F1_curve.png', names, ylabel='F1')
+        plot_mc_curve(px, p, Path(save_dir) / f'{prefix}P_curve.png', names, ylabel='Precision')
+        plot_mc_curve(px, r, Path(save_dir) / f'{prefix}R_curve.png', names, ylabel='Recall')
+
+    i = smooth(f1.mean(0), 0.1).argmax()  # max F1 index
+    p, r, f1 = p[:, i], r[:, i], f1[:, i]
+    tp = (r * nt).round()  # true positives
+    fp = (tp / (p + eps) - tp).round()  # false positives
+    return tp, fp, p, r, f1, ap, unique_classes.astype(int)
+
+def smooth(y, f=0.05):
+    # Box filter of fraction f
+    nf = round(len(y) * f * 2) // 2 + 1  # number of filter elements (must be odd)
+    p = np.ones(nf // 2)  # ones padding
+    yp = np.concatenate((p * y[0], y, p * y[-1]), 0)  # y padded
+    return np.convolve(yp, np.ones(nf) / nf, mode='valid')  # y-smoothed
 
 def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='precision-recall_curve.png', names=[]):
     """ Compute the average precision, given the recall and precision curves.
@@ -574,3 +923,24 @@ def plot_pr_curve(px, py, ap, save_dir='.', names=()):
     ax.set_ylim(0, 1)
     plt.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
     fig.savefig(Path(save_dir) / 'precision_recall_curve.png', dpi=250)
+
+def plot_mc_curve(px, py, save_dir=Path('mc_curve.png'), names=(), xlabel='Confidence', ylabel='Metric'):
+    # Metric-confidence curve
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
+
+    if 0 < len(names) < 21:  # display per-class legend if < 21 classes
+        for i, y in enumerate(py):
+            ax.plot(px, y, linewidth=1, label=f'{names[i]}')  # plot(confidence, metric)
+    else:
+        ax.plot(px, py.T, linewidth=1, color='grey')  # plot(confidence, metric)
+
+    y = smooth(py.mean(0), 0.05)
+    ax.plot(px, y, linewidth=3, color='blue', label=f'all classes {y.max():.2f} at {px[y.argmax()]:.3f}')
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+    ax.set_title(f'{ylabel}-Confidence Curve')
+    fig.savefig(save_dir, dpi=250)
+    plt.close(fig)

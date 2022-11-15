@@ -58,7 +58,7 @@ class MultiHeadLoss(nn.Module):
         """
 
         Args:
-            predictions: predicts of [[det_head1, det_head2, det_head3], drive_area_seg_head, lane_line_seg_head, in_det_head, in_seg_head(proto)]
+            predictions: predicts of [[det_head1, det_head2, det_head3], drive_area_seg_head, lane_line_seg_head, (in_det_head(p), in_seg_head(proto))]
             targets: gts [det_targets, segment_targets, lane_targets, in_seg_targets]
             model:
 
@@ -74,9 +74,10 @@ class MultiHeadLoss(nn.Module):
         tcls, tbox, indices, anchors = build_targets(cfg, predictions[0], targets[0], model)  # targets
 
         # Intance Segmentation parameters
+        p, proto = predictions[3]
         in_lcls, in_lbox, in_lobj, in_lseg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
-        in_tcls, in_tbox, in_indices, in_anchors, in_tidxs, in_xywhn = seg_build_targets(cfg, predictions[3], targets[3], model)  # Instance Segmentation targets
-        bs, nm, mask_h, mask_w = predictions[4].shape  # batch size, number of masks, mask height, mask width
+        in_tcls, in_tbox, in_indices, in_anchors, in_tidxs, in_xywhn = seg_build_targets(cfg, p, targets[3], model)  # Instance Segmentation targets
+        bs, nm, mask_h, mask_w = proto.shape  # batch size, number of masks, mask height, mask width
 
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
         cp, cn = smooth_BCE(eps=0.0)
@@ -87,7 +88,7 @@ class MultiHeadLoss(nn.Module):
         # Calculate Losses
         no = len(predictions[0])  # number of outputs
         balance = [4.0, 1.0, 0.4] if no == 3 else [4.0, 1.0, 0.4, 0.1]  # P3-5 or P3-6
-        nl = len(predictions[3])
+        nl = len(p)
         in_balance = [4.0, 1.0, 0.4] if nl == 3 else [4.0, 1.0, 0.25, 0.06, 0.02]  # P3-P7
 
         # calculate detection loss
@@ -118,13 +119,13 @@ class MultiHeadLoss(nn.Module):
             lobj += BCEobj(pi[..., 4], in_tobj) * balance[i]  # obj loss
 
         # Losses for Instance Segementation
-        for i, pi in enumerate(predictions[3]):  # layer index, layer predictions
+        for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = in_indices[i]  # image, anchor, gridy, gridx
             in_tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=device)  # target obj
 
             n = b.shape[0]  # number of targets
             if n:
-                pxy, pwh, _, pcls, pmask = pi[b, a, gj, gi].split((2, 2, 1, model.nc, nm), 1)  # subset of predictions
+                pxy, pwh, _, pcls, pmask = pi[b, a, gj, gi].split((2, 2, 1, model.nc_in, nm), 1)  # subset of predictions
                 # Box regression
                 pxy = pxy.sigmoid() * 2 - 0.5
                 pwh = (pwh.sigmoid() * 2) ** 2 * in_anchors[i]
@@ -139,7 +140,7 @@ class MultiHeadLoss(nn.Module):
                 in_tobj[b, a, gj, gi] = iou  # iou ratio
 
                 # Classification
-                if model.nc > 1:  # cls loss (only if multiple classes)
+                if model.nc_in > 1:  # cls loss (only if multiple classes)
                     t = torch.full_like(pcls, cn_in, device=device)  # targets
                     t[range(n), in_tcls[i]] = cp_in
                     in_lcls += BCEcls_in(pcls, t)  # BCE
@@ -152,7 +153,7 @@ class MultiHeadLoss(nn.Module):
                 for bi in b.unique():
                     j = b == bi  # matching index
                     mask_gti = torch.where(masks[bi][None] == in_tidxs[i][j].view(-1, 1, 1), 1.0, 0.0)
-                    in_lseg += self.single_mask_loss(mask_gti, pmask[j], predictions[4][bi], mxyxy[j], marea[j],nm)
+                    in_lseg += self.single_mask_loss(mask_gti, pmask[j], proto[bi], mxyxy[j], marea[j],nm)
 
             obji = BCEobj_in(pi[..., 4], in_tobj)
             in_lobj += obji * in_balance[i]  # obj loss

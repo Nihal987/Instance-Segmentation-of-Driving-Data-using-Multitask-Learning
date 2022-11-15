@@ -26,12 +26,12 @@ from lib.config import update_config
 from lib.core.loss import get_loss
 from lib.core.function import train
 from lib.core.function import validate
-from lib.core.general import fitness
+from lib.core.general import fitness, in_fitness
 from lib.models import get_net
 from lib.utils import is_parallel
 from lib.utils.utils import get_optimizer
 from lib.utils.utils import save_checkpoint
-from lib.utils.utils import create_logger, select_device
+from lib.utils.utils import create_logger, select_device, EarlyStopping
 from lib.utils import run_anchor
 
 
@@ -133,6 +133,8 @@ def main():
     best_perf = 0.0
     best_model = False
     last_epoch = -1
+    best_fitness = 0.0
+    stopper, stop = EarlyStopping(patience=100), False
 
     #NEED TO CHANGE
     Encoder_para_idx = [str(i) for i in range(0, 17)]
@@ -325,24 +327,30 @@ def main():
         
         lr_scheduler.step()
 
+        is_bestfit = False
         # evaluate on validation set
         if (epoch % cfg.TRAIN.VAL_FREQ == 0 or epoch == cfg.TRAIN.END_EPOCH) and rank in [-1, 0]:
             # print('validate')
-            da_segment_results,ll_segment_results,detect_results, total_loss,maps, times = validate(
-                epoch,cfg, valid_loader, valid_dataset, model, criterion,
+            da_segment_results,ll_segment_results,detect_results, total_loss,in_results,maps, times = validate(
+                epoch,cfg, valid_loader, valid_dataset, model, criterion,valid_loader,
                 final_output_dir, tb_log_dir, writer_dict,
                 logger, device, rank
             )
-            fi = fitness(np.array(detect_results).reshape(1, -1))  #目标检测评价指标
-
+            fi = fitness(np.array(detect_results).reshape(1, -1))  
+            in_fi = in_fitness(np.array(in_results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+            stop = stopper(epoch=epoch, fitness=in_fi)  # early stop check
             msg = 'Epoch: [{0}]    Loss({loss:.3f})\n' \
                       'Driving area Segment: Acc({da_seg_acc:.3f})    IOU ({da_seg_iou:.3f})    mIOU({da_seg_miou:.3f})\n' \
                       'Lane line Segment: Acc({ll_seg_acc:.3f})    IOU ({ll_seg_iou:.3f})  mIOU({ll_seg_miou:.3f})\n' \
                       'Detect: P({p:.3f})  R({r:.3f})  mAP@0.5({map50:.3f})  mAP@0.5:0.95({map:.3f})\n'\
+                      'in_Detect: P({in_p:.3f})  R({in_r:.3f})  mAP@0.5({in_map50:.3f})  mAP@0.5:0.95({in_map:.3f})\n'\
+                      'Mask: P({mask_p:.3f})  R({mask_r:.3f})  mAP@0.5({mask_map50:.3f})  mAP@0.5:0.95({mask_map:.3f})\n'\
                       'Time: inference({t_inf:.4f}s/frame)  nms({t_nms:.4f}s/frame)'.format(
                           epoch,  loss=total_loss, da_seg_acc=da_segment_results[0],da_seg_iou=da_segment_results[1],da_seg_miou=da_segment_results[2],
                           ll_seg_acc=ll_segment_results[0],ll_seg_iou=ll_segment_results[1],ll_seg_miou=ll_segment_results[2],
                           p=detect_results[0],r=detect_results[1],map50=detect_results[2],map=detect_results[3],
+                          in_p=in_results[0],in_r=in_results[1],in_map50=in_results[2],in_map=in_results[3],
+                          mask_p=in_results[4],mask_r=in_results[5],mask_map50=in_results[6],mask_map=in_results[7],
                           t_inf=times[0], t_nms=times[1])
             logger.info(msg)
 
@@ -352,6 +360,11 @@ def main():
             # else:
             #     best_model = False
 
+        # Update best mAP
+        if in_fi > best_fitness:
+            best_fitness = in_fi
+            is_bestfit = True
+        
         # save checkpoint model and best model
         if rank in [-1, 0]:
             savepath = os.path.join(final_output_dir, f'epoch-{epoch}.pth')
@@ -364,7 +377,8 @@ def main():
                 # 'perf': perf_indicator,
                 optimizer=optimizer,
                 output_dir=final_output_dir,
-                filename=f'epoch-{epoch}.pth'
+                filename=f'epoch-{epoch}.pth',
+                is_best=is_bestfit
             )
             save_checkpoint(
                 epoch=epoch,
@@ -374,8 +388,19 @@ def main():
                 # 'perf': perf_indicator,
                 optimizer=optimizer,
                 output_dir=os.path.join(cfg.LOG_DIR, cfg.DATASET.DATASET),
-                filename='checkpoint.pth'
+                filename='checkpoint.pth',
+                is_best=is_bestfit
             )
+
+        # Early Stopping
+        if rank != -1:  # if DDP training
+            broadcast_list = [stop if rank == 0 else None]
+            dist.broadcast_object_list(broadcast_list, 0)  # broadcast 'stop' to all ranks
+            if rank != 0:
+                stop = broadcast_list[0]
+        if stop:
+            break  # must break all DDP ranks
+
 
     # save final model
     if rank in [-1, 0]:
