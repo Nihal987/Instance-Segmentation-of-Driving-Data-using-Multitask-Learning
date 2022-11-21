@@ -7,8 +7,8 @@ from sklearn.cluster import DBSCAN
 
 def seg_build_targets(self, cfg, p, targets,model):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
-        det = model.module.model[model.module.detector_index] if is_parallel(model) \
-        else model.model[model.detector_index]  # Detect() module
+        det = model.module.model[model.module.in_seg_out_idx] if is_parallel(model) \
+        else model.model[model.in_seg_out_idx]  # ISegment() module
 
         na, nt = det.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, indices, anch, tidxs, xywhn = [], [], [], [], [], []

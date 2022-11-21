@@ -7,10 +7,12 @@ from scipy.cluster.vq import kmeans
 from tqdm import tqdm
 from lib.utils import is_parallel
 
-
-def check_anchor_order(m):
+def check_anchor_order(m,type="Detect"):
     # Check anchor order against stride order for YOLOv5 Detect() module m, and correct if necessary
-    a = m.anchor_grid.prod(-1).view(-1)  # anchor area
+    if type=="IDetect":
+        a = m.anchors.prod(-1).mean(-1).view(-1)  # mean anchor area per output layer
+    else:
+        a = m.anchor_grid.prod(-1).view(-1)  # anchor area
     da = a[-1] - a[0]  # delta a
     ds = m.stride[-1] - m.stride[0]  # delta s
     if da.sign() != ds.sign():  # same order

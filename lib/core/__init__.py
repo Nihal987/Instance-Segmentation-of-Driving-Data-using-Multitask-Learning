@@ -1,4 +1,5 @@
 from .function import AverageMeter
+import contextlib
 
 class TryExcept(contextlib.ContextDecorator):
     # YOLOv5 TryExcept class. Usage: @TryExcept() decorator or 'with TryExcept():' context manager
