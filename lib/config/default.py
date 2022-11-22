@@ -9,7 +9,7 @@ _C.GPUS = (0,1)
 _C.WORKERS = 0
 _C.PIN_MEMORY = False
 _C.PRINT_FREQ = 20
-_C.AUTO_RESUME =False       # Resume from the last training interrupt
+_C.AUTO_RESUME =True       # Resume from the last training interrupt
 _C.NEED_AUTOANCHOR = False      # Re-select the prior anchor(k-means)    When training from scratch (epoch=0), set it to be ture!
 _C.DEBUG = False
 _C.num_seg_class = 2
@@ -55,7 +55,6 @@ _C.LOSS.LL_IOU_GAIN = 0.2 # lane line iou loss gain
 _C.DATASET = CN(new_allowed=True)
 _C.DATASET.DATAROOT = 'bdd_small/images'       # the path of images folder
 _C.DATASET.LABELROOT = 'bdd_small/det_annotations'      # the path of det_annotations folder
-_C.DATASET.MASKROOT = 'bdd_small/da_seg_annotations'             # the path of da_seg_annotations folder
 _C.DATASET.LANEROOT = 'bdd_small/ll_seg_annotations'             # the path of ll_seg_annotations folder
 _C.DATASET.INS_MASKROOT = 'bdd_small/in_seg_annotations'        # the path of in_seg_annotations folder
 _C.DATASET.DATASET = 'BddDataset'
@@ -111,11 +110,12 @@ _C.TRAIN.SEG_ONLY = False           # Only train two segmentation branchs
 _C.TRAIN.DET_ONLY = False           # Only train detection branch
 _C.TRAIN.ENC_SEG_ONLY = False       # Only train encoder and two segmentation branchs
 _C.TRAIN.ENC_DET_ONLY = False       # Only train encoder and detection branch
+_C.TRAIN.ENC_INS_SEG_ONLY = False      # Only train encoder + da ins segmentation task
 
 # Single task 
-_C.TRAIN.DRIVABLE_ONLY = False      # Only train da_segmentation task
 _C.TRAIN.LANE_ONLY = False          # Only train ll_segmentation task
 _C.TRAIN.DET_ONLY = False          # Only train detection task
+_C.TRAIN.INS_SEG_ONLY = False       # Only train Ins segmentation task
 
 
 

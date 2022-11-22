@@ -193,33 +193,33 @@ class MultiHeadLoss(nn.Module):
         liou_ll *= cfg.LOSS.LL_IOU_GAIN * self.lambdas[4]
 
         
-        if cfg.TRAIN.DET_ONLY or cfg.TRAIN.ENC_DET_ONLY or cfg.TRAIN.DET_ONLY:
+        if cfg.TRAIN.DET_ONLY or cfg.TRAIN.ENC_DET_ONLY: # Didn't change
             lseg_da = 0 * lseg_da
             lseg_ll = 0 * lseg_ll
             liou_ll = 0 * liou_ll
             
-        if cfg.TRAIN.SEG_ONLY or cfg.TRAIN.ENC_SEG_ONLY:
+        if cfg.TRAIN.ENC_SEG_ONLY: # Train encoder + ins seg of da + ll seg
             lcls = 0 * lcls
             lobj = 0 * lobj
             lbox = 0 * lbox
 
-        if cfg.TRAIN.LANE_ONLY:
+        if cfg.TRAIN.LANE_ONLY: # Didn't change
             lcls = 0 * lcls
             lobj = 0 * lobj
             lbox = 0 * lbox
             lseg_da = 0 * lseg_da
 
-        if cfg.TRAIN.DRIVABLE_ONLY:
+        if cfg.TRAIN.ENC_INS_SEG_ONLY: # Train only encoder + ins seg of da
             lcls = 0 * lcls
             lobj = 0 * lobj
             lbox = 0 * lbox
             lseg_ll = 0 * lseg_ll
             liou_ll = 0 * liou_ll
 
-        loss = lbox + lobj + lcls + lseg_da + lseg_ll + liou_ll + in_lcls + in_lobj + in_lbox + in_lseg 
+        loss = lbox + lobj + lcls + lseg_ll + liou_ll + in_lcls + in_lobj + in_lbox + in_lseg 
         # loss = lseg
         # return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
-        return loss, (lbox.item(), lobj.item(), lcls.item(), lseg_da.item(), lseg_ll.item(), liou_ll.item(), in_lcls.item(), in_lobj.item(), in_lbox.item(), in_lseg.item(), loss.item())
+        return loss, (lbox.item(), lobj.item(), lcls.item(), lseg_ll.item(), liou_ll.item(), in_lcls.item(), in_lobj.item(), in_lbox.item(), in_lseg.item(), loss.item())
 
     def single_mask_loss(self, gt_mask, pred, proto, xyxy, area,nm):
         # Mask loss for one image

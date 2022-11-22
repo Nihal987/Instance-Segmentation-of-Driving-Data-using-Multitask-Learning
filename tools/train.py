@@ -139,8 +139,8 @@ def main():
     #NEED TO CHANGE
     Encoder_para_idx = [str(i) for i in range(0, 17)]
     Det_Head_para_idx = [str(i) for i in range(17, 25)]
-    Da_Seg_Head_para_idx = [str(i) for i in range(25, 34)]
-    Ll_Seg_Head_para_idx = [str(i) for i in range(34,43)]
+    Ll_Seg_Head_para_idx = [str(i) for i in range(25, 34)]
+    Ins_Seg_Head_para_idx = [str(i) for i in range(34,42)]
 
     lf = lambda x: ((1 + math.cos(x * math.pi / cfg.TRAIN.END_EPOCH)) / 2) * \
                    (1 - cfg.TRAIN.LRF) + cfg.TRAIN.LRF  # cosine
@@ -190,6 +190,7 @@ def main():
             #cfg.NEED_AUTOANCHOR = False     #disable autoanchor
         # model = model.to(device)
 
+        # IMPORTANT
         if cfg.TRAIN.SEG_ONLY:  #Only train two segmentation branchs
             logger.info('freeze encoder and Det head...')
             for k, v in model.named_parameters():
@@ -203,7 +204,7 @@ def main():
             # print(model.named_parameters)
             for k, v in model.named_parameters():
                 v.requires_grad = True  # train all layers
-                if k.split(".")[1] in Encoder_para_idx + Da_Seg_Head_para_idx + Ll_Seg_Head_para_idx:
+                if k.split(".")[1] in Encoder_para_idx + Ll_Seg_Head_para_idx + Ins_Seg_Head_para_idx:
                     print('freezing %s' % k)
                     v.requires_grad = False
 
@@ -219,7 +220,7 @@ def main():
             logger.info('freeze two Seg heads...')
             for k, v in model.named_parameters():
                 v.requires_grad = True  # train all layers
-                if k.split(".")[1] in Da_Seg_Head_para_idx + Ll_Seg_Head_para_idx:
+                if k.split(".")[1] in Ll_Seg_Head_para_idx + Ins_Seg_Head_para_idx:
                     print('freezing %s' % k)
                     v.requires_grad = False
 
@@ -229,16 +230,27 @@ def main():
             # print(model.named_parameters)
             for k, v in model.named_parameters():
                 v.requires_grad = True  # train all layers
-                if k.split(".")[1] in Encoder_para_idx + Da_Seg_Head_para_idx + Det_Head_para_idx:
+                if k.split(".")[1] in Encoder_para_idx + Det_Head_para_idx + Ins_Seg_Head_para_idx:
                     print('freezing %s' % k)
                     v.requires_grad = False
 
-        if cfg.TRAIN.DRIVABLE_ONLY:
+        # IMPORTANT
+        if cfg.TRAIN.INS_SEG_ONLY:
             logger.info('freeze encoder and Det head and Ll_Seg heads...')
             # print(model.named_parameters)
             for k, v in model.named_parameters():
                 v.requires_grad = True  # train all layers
                 if k.split(".")[1] in Encoder_para_idx + Ll_Seg_Head_para_idx + Det_Head_para_idx:
+                    print('freezing %s' % k)
+                    v.requires_grad = False
+
+        # IMPORTANT
+        if cfg.TRAIN.ENC_INS_SEG_ONLY:
+            logger.info('freeze encoder and Det head and Ll_Seg heads...')
+            # print(model.named_parameters)
+            for k, v in model.named_parameters():
+                v.requires_grad = True  # train all layers
+                if k.split(".")[1] in Ll_Seg_Head_para_idx + Det_Head_para_idx:
                     print('freezing %s' % k)
                     v.requires_grad = False
         
