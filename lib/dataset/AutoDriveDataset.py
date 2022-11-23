@@ -290,15 +290,17 @@ class AutoDriveDataset(Dataset):
     @staticmethod
     def collate_fn(batch):
         img, label, paths, shapes, masks= zip(*batch)
-        label_det, label_seg, label_lane, in_label_seg = [], [], [], []
+        label_det, label_lane, in_label_seg = [], [], []
         batched_masks = torch.cat(masks, 0)
         for i, l in enumerate(label):
-            l_det, l_seg, l_lane, in_l_seg = l
+            l_det, l_lane, in_l_seg = l
             l_det[:, 0] = i  # add target image index for build_targets()
             in_l_seg[:, 0] = i  # add target image index for build_targets()
             label_det.append(l_det)
-            label_seg.append(l_seg)
             label_lane.append(l_lane)
             in_label_seg.append(in_l_seg)
-        return torch.stack(img, 0), [torch.cat(label_det, 0), torch.stack(label_seg, 0), torch.stack(label_lane, 0), torch.stack(in_label_seg, 0)], paths, shapes, batched_masks
+            det = l_det.shape
+            ins = in_l_seg.shape
+            lane = l_lane.shape
+        return torch.stack(img, 0), [torch.cat(label_det, 0), torch.stack(label_lane, 0), torch.cat(in_label_seg, 0)], paths, shapes, batched_masks
 

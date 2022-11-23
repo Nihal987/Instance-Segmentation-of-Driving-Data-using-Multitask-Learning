@@ -5,7 +5,7 @@ np.set_printoptions(threshold=np.inf)
 import cv2
 from sklearn.cluster import DBSCAN
 
-def seg_build_targets(self, cfg, p, targets,model):
+def seg_build_targets(cfg, p, targets, model):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
         det = model.module.model[model.module.in_seg_out_idx] if is_parallel(model) \
         else model.model[model.in_seg_out_idx]  # ISegment() module

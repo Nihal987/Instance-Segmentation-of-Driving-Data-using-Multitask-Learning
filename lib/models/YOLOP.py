@@ -193,5 +193,6 @@ if __name__ == "__main__":
     p,proto = ins_seg
     for p1 in p:
         print(p1.shape)
+    print("PROTO")
     print(proto.shape)
  

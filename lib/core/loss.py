@@ -77,7 +77,7 @@ class MultiHeadLoss(nn.Module):
         # Intance Segmentation parameters
         p, proto = predictions[2]
         in_lcls, in_lbox, in_lobj, in_lseg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
-        in_tcls, in_tbox, in_indices, in_anchors, in_tidxs, in_xywhn = seg_build_targets(cfg, p, targets[2], model)  # Instance Segmentation targets
+        in_tcls, in_tbox, in_indices, in_anchors, in_tidxs, in_xywhn = seg_build_targets(cfg=cfg,p=p,targets=targets[2],model=model)  # Instance Segmentation targets
         bs, nm, mask_h, mask_w = proto.shape  # batch size, number of masks, mask height, mask width
 
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
@@ -170,8 +170,8 @@ class MultiHeadLoss(nn.Module):
         pad_w, pad_h = shapes[0][1][1]
         pad_w = int(pad_w)
         pad_h = int(pad_h)
-        _,lane_line_pred=torch.max(predictions[2], 1)
-        _,lane_line_gt=torch.max(targets[2], 1)
+        _,lane_line_pred=torch.max(predictions[1], 1)
+        _,lane_line_gt=torch.max(targets[1], 1)
         lane_line_pred = lane_line_pred[:, pad_h:height-pad_h, pad_w:width-pad_w]
         lane_line_gt = lane_line_gt[:, pad_h:height-pad_h, pad_w:width-pad_w]
         metric.reset()

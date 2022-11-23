@@ -3,6 +3,7 @@ from lib.core.evaluate import ConfusionMatrix,SegmentationMetric
 from lib.core.general import non_max_suppression,in_non_max_suppression,check_img_size,scale_coords,xyxy2xywh,xywh2xyxy,in_xywh2xyxy,box_iou,coco80_to_coco91_class,plot_images,ap_per_class,ap_per_class_box_and_mask,output_to_target,process_mask_upsample, mask_iou, in_box_iou
 from lib.utils.utils import time_synchronized
 from lib.utils.plot import plot_one_box, show_seg_result, in_plot_images_and_masks
+from lib.utils import is_parallel
 import torch
 from threading import Thread
 import numpy as np
@@ -195,8 +196,10 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
     nc = 1
     iouv = torch.linspace(0.5,0.95,10).to(device)     #iou vector for mAP@0.5:0.95
     niou = iouv.numel()
-    nm = model[-1].nm # number of masks
-    in_nc = model[-1].nc
+    ISegment = model.module.model[model.module.in_seg_out_idx] if is_parallel(model) \
+        else model.model[model.in_seg_out_idx]  # ISegment() module
+    nm = ISegment.nm # number of masks
+    in_nc = model.nc_in # number of classes for instance segmentation
     try:
         import wandb
     except ImportError:
@@ -206,12 +209,11 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
     seen =  0 
     confusion_matrix = ConfusionMatrix(nc=model.nc) #detector confusion matrix
     in_confusion_matrix = ConfusionMatrix(nc=model.nc_in) #detector confusion matrix for instance segmentation
-    da_metric = SegmentationMetric(config.num_seg_class) #segment confusion matrix    
     ll_metric = SegmentationMetric(2) #segment confusion matrix
     in_metrics = Metrics()
 
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
-    in_names = model.in_names if hasattr(model, 'in_names') else model.module.in_names  # get class names for instance segmentation
+    in_names = model.names_in if hasattr(model, 'names_in') else model.module.names_in  # get class names for instance segmentation
     if isinstance(in_names, (list, tuple)):  # old format
         in_names = dict(enumerate(in_names))
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
@@ -222,10 +224,6 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
     p, r, f1, mp, mr, map50, map, t_inf, t_nms = 0., 0., 0., 0., 0., 0., 0., 0., 0.
     
     losses = AverageMeter()
-
-    da_acc_seg = AverageMeter()
-    da_IoU_seg = AverageMeter()
-    da_mIoU_seg = AverageMeter()
 
     ll_acc_seg = AverageMeter()
     ll_IoU_seg = AverageMeter()
@@ -256,29 +254,13 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             ratio = shapes[0][1][0][0]
 
             t = time_synchronized()
-            det_out, da_seg_out, ll_seg_out, in_det_out = model(img)
+            det_out, ll_seg_out, in_det_out = model(img)
             t_inf = time_synchronized() - t
             if batch_i > 0:
                 T_inf.update(t_inf/img.size(0),img.size(0))
 
             inf_out,train_out = det_out
             ins_out, in_train_out = in_det_out
-
-            #driving area segment evaluation
-            _,da_predict=torch.max(da_seg_out, 1)
-            _,da_gt=torch.max(target[1], 1)
-            da_predict = da_predict[:, pad_h:height-pad_h, pad_w:width-pad_w]
-            da_gt = da_gt[:, pad_h:height-pad_h, pad_w:width-pad_w]
-
-            da_metric.reset()
-            da_metric.addBatch(da_predict.cpu(), da_gt.cpu())
-            da_acc = da_metric.pixelAccuracy()
-            da_IoU = da_metric.IntersectionOverUnion()
-            da_mIoU = da_metric.meanIntersectionOverUnion()
-
-            da_acc_seg.update(da_acc,img.size(0))
-            da_IoU_seg.update(da_IoU,img.size(0))
-            da_mIoU_seg.update(da_mIoU,img.size(0))
 
             #lane line segment evaluation
             _,ll_predict=torch.max(ll_seg_out, 1)
@@ -296,7 +278,7 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             ll_IoU_seg.update(ll_IoU,img.size(0))
             ll_mIoU_seg.update(ll_mIoU,img.size(0))
             
-            total_loss, head_losses = criterion((train_out,da_seg_out,ll_seg_out,in_train_out), target, shapes,model,masks)   #Compute loss
+            total_loss, head_losses = criterion((train_out,ll_seg_out,in_train_out), target, shapes,model,masks)   #Compute loss
             losses.update(total_loss.item(), img.size(0))
 
             #NMS
