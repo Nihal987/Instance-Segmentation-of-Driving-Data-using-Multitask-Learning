@@ -260,11 +260,11 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
                 T_inf.update(t_inf/img.size(0),img.size(0))
 
             inf_out,train_out = det_out
-            ins_out, in_train_out = in_det_out
+            in_preds, protos, in_train_out = in_det_out
 
             #lane line segment evaluation
             _,ll_predict=torch.max(ll_seg_out, 1)
-            _,ll_gt=torch.max(target[2], 1)
+            _,ll_gt=torch.max(target[1], 1)
             ll_predict = ll_predict[:, pad_h:height-pad_h, pad_w:width-pad_w]
             ll_gt = ll_gt[:, pad_h:height-pad_h, pad_w:width-pad_w]
 
@@ -278,17 +278,17 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             ll_IoU_seg.update(ll_IoU,img.size(0))
             ll_mIoU_seg.update(ll_mIoU,img.size(0))
             
-            total_loss, head_losses = criterion((train_out,ll_seg_out,in_train_out), target, shapes,model,masks)   #Compute loss
+            total_loss, head_losses = criterion((train_out,ll_seg_out,(in_train_out,protos)), target, shapes,model,masks)   #Compute loss
             losses.update(total_loss.item(), img.size(0))
 
             #NMS
             t = time_synchronized()
             target[0][:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
-            target[3][:, 2:] *= torch.Tensor([width, height, width, height]).to(device)
+            target[2][:, 2:] *= torch.Tensor([width, height, width, height]).to(device)
             lb = [target[0][target[0][:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
-            in_lb = [target[3][target[3][:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
+            in_lb = [target[2][target[2][:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
             output = non_max_suppression(inf_out, conf_thres= config.TEST.NMS_CONF_THRESHOLD, iou_thres=config.TEST.NMS_IOU_THRESHOLD, labels=lb)
-            in_output = in_non_max_suppression(ins_out, conf_thres= config.TEST.NMS_CONF_THRESHOLD, iou_thres=config.TEST.NMS_IOU_THRESHOLD, labels=in_lb,max_det=300,nm=nm)
+            in_preds = in_non_max_suppression(in_preds, conf_thres= config.TEST.NMS_CONF_THRESHOLD, iou_thres=config.TEST.NMS_IOU_THRESHOLD, labels=in_lb,max_det=300,nm=nm)
             #output = non_max_suppression(inf_out, conf_thres=0.001, iou_thres=0.6)
             #output = non_max_suppression(inf_out, conf_thres=config.TEST.NMS_CONF_THRES, iou_thres=config.TEST.NMS_IOU_THRES)
             t_nms = time_synchronized() - t
@@ -298,29 +298,12 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             if config.TEST.PLOTS:
                 if batch_i == 0:
                     for i in range(test_batch_size):
-                        img_test = cv2.imread(paths[i])
-                        da_seg_mask = da_seg_out[i][:, pad_h:height-pad_h, pad_w:width-pad_w].unsqueeze(0)
-                        da_seg_mask = torch.nn.functional.interpolate(da_seg_mask, scale_factor=int(1/ratio), mode='bilinear')
-                        _, da_seg_mask = torch.max(da_seg_mask, 1)
-
-                        da_gt_mask = target[1][i][:, pad_h:height-pad_h, pad_w:width-pad_w].unsqueeze(0)
-                        da_gt_mask = torch.nn.functional.interpolate(da_gt_mask, scale_factor=int(1/ratio), mode='bilinear')
-                        _, da_gt_mask = torch.max(da_gt_mask, 1)
-
-                        da_seg_mask = da_seg_mask.int().squeeze().cpu().numpy()
-                        da_gt_mask = da_gt_mask.int().squeeze().cpu().numpy()
-                        # seg_mask = seg_mask > 0.5
-                        # plot_img_and_mask(img_test, seg_mask, i,epoch,save_dir)
-                        img_test1 = img_test.copy()
-                        _ = show_seg_result(img_test, da_seg_mask, i,epoch,save_dir)
-                        _ = show_seg_result(img_test1, da_gt_mask, i, epoch, save_dir, is_gt=True)
-
                         img_ll = cv2.imread(paths[i])
                         ll_seg_mask = ll_seg_out[i][:, pad_h:height-pad_h, pad_w:width-pad_w].unsqueeze(0)
                         ll_seg_mask = torch.nn.functional.interpolate(ll_seg_mask, scale_factor=int(1/ratio), mode='bilinear')
                         _, ll_seg_mask = torch.max(ll_seg_mask, 1)
 
-                        ll_gt_mask = target[2][i][:, pad_h:height-pad_h, pad_w:width-pad_w].unsqueeze(0)
+                        ll_gt_mask = target[1][i][:, pad_h:height-pad_h, pad_w:width-pad_w].unsqueeze(0)
                         ll_gt_mask = torch.nn.functional.interpolate(ll_gt_mask, scale_factor=int(1/ratio), mode='bilinear')
                         _, ll_gt_mask = torch.max(ll_gt_mask, 1)
 
@@ -360,10 +343,10 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
         # output([xyxy,conf,cls])
         # target[0] ([img_id,cls,xyxy])
         plot_masks = []  # masks for plotting
-        for si, pred in enumerate(output):
-            in_pred = in_output[si]
+        for si, (in_pred,proto) in enumerate(zip(in_preds, protos)):
+            pred = output[si]
             labels = target[0][target[0][:, 0] == si, 1:]     #all object in one image 
-            in_labels = target[3][target[3][:, 0] == si, 1:]     #all object in one image 
+            in_labels = target[2][target[2][:, 0] == si, 1:]     #all object in one image 
             nl = len(labels)    # num of object
             in_nl, in_npr = in_labels.shape[0], in_pred.shape[0]  # number of labels, predictions
             tcls = labels[:, 0].tolist() if nl else []  # target class
@@ -385,10 +368,9 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
                 continue
 
             # Masks
-            midx = [si] 
+            midx = [si] if config.DATASET.OVERLAP else target[2][:, 0] == si
             gt_masks = masks[midx]
-            proto_out = in_train_out[1][si]
-            pred_masks = process_mask_upsample(proto_out, in_pred[:, 6:], in_pred[:, :4], shape=img[si].shape[1:])
+            pred_masks = process_mask_upsample(proto, in_pred[:, 6:], in_pred[:, :4], shape=img[si].shape[1:])
             
             # Predictions
             predn = pred.clone()
@@ -480,12 +462,10 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
                                   'score': round(p[4], 5)})
 
         if config.TEST.PLOTS and batch_i < 3:
-            f = save_dir +'/'+ f'test_batch{batch_i}_labels.jpg'  # labels
-            #Thread(target=plot_images, args=(img, target[0], paths, f, names), daemon=True).start()
-            f = save_dir +'/'+ f'test_batch{batch_i}_pred.jpg'  # predictions
-            #Thread(target=plot_images, args=(img, output_to_target(output), paths, f, names), daemon=True).start()
-            in_plot_images_and_masks(img, target[3], masks, paths, save_dir / f'val_batch{batch_i}_labels.jpg', in_names)
-            in_plot_images_and_masks(img, output_to_target(in_output, max_det=15), plot_masks, paths,
+            if len(plot_masks):
+                plot_masks = torch.cat(plot_masks, dim=0)
+            in_plot_images_and_masks(img, target[2], masks, paths, save_dir / f'val_batch{batch_i}_labels.jpg', in_names)
+            in_plot_images_and_masks(img, output_to_target(in_preds, max_det=15), plot_masks, paths,
                                   save_dir / f'val_batch{batch_i}_pred.jpg', in_names)  # pred
 
 
@@ -513,7 +493,7 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
     pf = '%20s' + '%12.3g' * 6  # print format
     print(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
     in_pf = '%22s' + '%11i' * 2 + '%11.3g' * 8  # print format
-    print(in_pf % ("all", seen, nt.sum(), *in_metrics.mean_results()))
+    print(in_pf % ("all", seen, in_nt.sum(), *in_metrics.mean_results()))
     if in_nt.sum() == 0:
         print(f'WARNING: no labels found in val set, can not compute metrics without labels ⚠️')
     
@@ -525,7 +505,7 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
         for i, c in enumerate(ap_class):
             print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap[i]))
         for i, c in enumerate(in_metrics.ap_class_index):
-            print(pf % (in_names[c], seen, in_nt[c], *in_metrics.class_result(i)))
+            print(in_pf % (in_names[c], seen, in_nt[c], *in_metrics.class_result(i)))
 
     # Print speeds
     t = tuple(x / seen * 1E3 for x in (t_inf, t_nms, t_inf + t_nms)) + (imgsz, imgsz, batch_size)  # tuple
@@ -558,12 +538,14 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             anno = COCO(anno_json)  # init annotations api
             pred = anno.loadRes(pred_json)  # init predictions api
             eval = COCOeval(anno, pred, 'bbox')
+            results = []
             if is_coco:
                 eval.params.imgIds = [int(Path(x).stem) for x in val_loader.dataset.img_files]  # image IDs to evaluate
             eval.evaluate()
             eval.accumulate()
             eval.summarize()
             map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
+            map_bbox, map50_bbox, map_mask, map50_mask = results
         except Exception as e:
             print(f'pycocotools unable to run: {e}')
 
@@ -577,7 +559,6 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
 
-    da_segment_result = (da_acc_seg.avg,da_IoU_seg.avg,da_mIoU_seg.avg)
     ll_segment_result = (ll_acc_seg.avg,ll_IoU_seg.avg,ll_mIoU_seg.avg)
 
     # print(da_segment_result)
@@ -586,7 +567,7 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
     # print('mp:{},mr:{},map50:{},map:{}'.format(mp, mr, map50, map))
     #print segmet_result
     t = [T_inf.avg, T_nms.avg]
-    return da_segment_result, ll_segment_result, detect_result, losses.avg, (*final_metric, *(total_loss.cpu() / len(dataloader)).tolist()),in_metrics.get_maps(in_nc), t
+    return ll_segment_result, detect_result, losses.avg, (*final_metric, *(total_loss.cpu() / len(dataloader)).tolist()),in_metrics.get_maps(in_nc), t
         
 
 
