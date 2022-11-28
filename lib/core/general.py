@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import yaml
 from PIL import Image
 from scipy.cluster.vq import kmeans
@@ -175,6 +176,33 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=
         return iou  # IoU
 
 
+def scale_image(im1_shape, masks, im0_shape, ratio_pad=None):
+    """
+    img1_shape: model input shape, [h, w]
+    img0_shape: origin pic shape, [h, w, 3]
+    masks: [h, w, num]
+    """
+    # Rescale coordinates (xyxy) from im1_shape to im0_shape
+    if ratio_pad is None:  # calculate from im0_shape
+        gain = min(im1_shape[0] / im0_shape[0], im1_shape[1] / im0_shape[1])  # gain  = old / new
+        pad = (im1_shape[1] - im0_shape[1] * gain) / 2, (im1_shape[0] - im0_shape[0] * gain) / 2  # wh padding
+    else:
+        pad = ratio_pad[1]
+    top, left = int(pad[1]), int(pad[0])  # y, x
+    bottom, right = int(im1_shape[0] - pad[1]), int(im1_shape[1] - pad[0])
+
+    if len(masks.shape) < 2:
+        raise ValueError(f'"len of masks shape" should be 2 or 3, but got {len(masks.shape)}')
+    masks = masks[top:bottom, left:right]
+    # masks = masks.permute(2, 0, 1).contiguous()
+    # masks = F.interpolate(masks[None], im0_shape[:2], mode='bilinear', align_corners=False)[0]
+    # masks = masks.permute(1, 2, 0).contiguous()
+    masks = cv2.resize(masks, (im0_shape[1], im0_shape[0]))
+
+    if len(masks.shape) == 2:
+        masks = masks[:, :, None]
+    return masks
+
 def mask_iou(mask1, mask2, eps=1e-7):
     """
     mask1: [N, n] m1 means number of predicted objects
@@ -201,11 +229,11 @@ def in_box_iou(box1, box2, eps=1e-7):
     """
 
     # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
-    (a1, a2), (b1, b2) = box1[:, None].chunk(2, 2), box2.chunk(2, 1)
+    (a1, a2), (b1, b2) = box1.unsqueeze(1).chunk(2, 2), box2.unsqueeze(0).chunk(2, 2)
     inter = (torch.min(a2, b2) - torch.max(a1, b1)).clamp(0).prod(2)
 
     # IoU = inter / (area1 + area2 - inter)
-    return inter / (box_area(box1.T)[:, None] + box_area(box2.T) - inter + eps)
+    return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
 
 def box_iou(box1, box2):
     # https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
@@ -485,7 +513,7 @@ def segments2boxes(segments):
     for s in segments:
         x, y = s.T  # segment xy
         boxes.append([x.min(), y.min(), x.max(), y.max()])  # cls, xyxy
-    return xyxy2xywh(np.array(boxes))  # cls, xywh
+    return in_xyxy2xywh(np.array(boxes))  # cls, xywh
 
 def resample_segments(segments, n=1000):
     # Up-sample an (n,2) segment
@@ -780,10 +808,10 @@ def in_ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', na
     names = [v for k, v in names.items() if k in unique_classes]  # list: only classes that have data
     names = dict(enumerate(names))  # to dict
     if plot:
-        plot_pr_curve(px, py, ap, Path(save_dir) / f'{prefix}PR_curve.png', names)
-        plot_mc_curve(px, f1, Path(save_dir) / f'{prefix}F1_curve.png', names, ylabel='F1')
-        plot_mc_curve(px, p, Path(save_dir) / f'{prefix}P_curve.png', names, ylabel='Precision')
-        plot_mc_curve(px, r, Path(save_dir) / f'{prefix}R_curve.png', names, ylabel='Recall')
+        plot_pr_curve(px, py, ap, save_dir + f'/{prefix}PR_curve.png', names)
+        plot_mc_curve(px, f1, save_dir + f'/{prefix}F1_curve.png', names, ylabel='F1')
+        plot_mc_curve(px, p, save_dir + f'/{prefix}P_curve.png', names, ylabel='Precision')
+        plot_mc_curve(px, r, save_dir + f'/{prefix}R_curve.png', names, ylabel='Recall')
 
     i = smooth(f1.mean(0), 0.1).argmax()  # max F1 index
     p, r, f1 = p[:, i], r[:, i], f1[:, i]
@@ -898,6 +926,15 @@ def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
          64, 65, 67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
     return x
 
+def in_output_to_target(output, max_det=300):
+    # Convert model output to target format [batch_id, class_id, x, y, w, h, conf] for plotting
+    targets = []
+    for i, o in enumerate(output):
+        box, conf, cls = o[:max_det, :6].cpu().split((4, 1, 1), 1)
+        j = torch.full((conf.shape[0], 1), i)
+        targets.append(torch.cat((j, cls, in_xyxy2xywh(box), conf), 1))
+    return torch.cat(targets, 0).numpy()
+
 def output_to_target(output):
     # Convert model output to target format [batch_id, class_id, x, y, w, h, conf]
     targets = []
@@ -922,6 +959,7 @@ def plot_pr_curve(px, py, ap, save_dir='.', names=()):
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     plt.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
     fig.savefig(Path(save_dir) / 'precision_recall_curve.png', dpi=250)
 
 def plot_mc_curve(px, py, save_dir=Path('mc_curve.png'), names=(), xlabel='Confidence', ylabel='Metric'):

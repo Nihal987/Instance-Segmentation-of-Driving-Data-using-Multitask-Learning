@@ -8,7 +8,7 @@ import numpy as np
 import math
 import random
 from PIL import Image, ImageDraw, ImageFont
-from ..core.general import is_ascii,is_writeable,in_xywh2xyxy
+from ..core.general import is_ascii,is_writeable,in_xywh2xyxy,scale_image
 from pathlib import Path
 import threading
 FONT = 'Arial.ttf'
@@ -145,6 +145,52 @@ class Annotator:
                             thickness=tf,
                             lineType=cv2.LINE_AA)
 
+    def masks(self, masks, colors, im_gpu=None, alpha=0.5):
+        """Plot masks at once.
+        Args:
+            masks (tensor): predicted masks on cuda, shape: [n, h, w]
+            colors (List[List[Int]]): colors for predicted masks, [[r, g, b] * n]
+            im_gpu (tensor): img is in cuda, shape: [3, h, w], range: [0, 1]
+            alpha (float): mask transparency: 0.0 fully transparent, 1.0 opaque
+        """
+        if self.pil:
+            # convert to numpy first
+            self.im = np.asarray(self.im).copy()
+        if im_gpu is None:
+            # Add multiple masks of shape(h,w,n) with colors list([r,g,b], [r,g,b], ...)
+            if len(masks) == 0:
+                return
+            if isinstance(masks, torch.Tensor):
+                masks = torch.as_tensor(masks, dtype=torch.uint8)
+                masks = masks.permute(1, 2, 0).contiguous()
+                masks = masks.cpu().numpy()
+            # masks = np.ascontiguousarray(masks.transpose(1, 2, 0))
+            masks = scale_image(masks.shape[:2], masks, self.im.shape)
+            masks = np.asarray(masks, dtype=np.float32)
+            colors = np.asarray(colors, dtype=np.float32)  # shape(n,3)
+            s = masks.sum(2, keepdims=True).clip(0, 1)  # add all masks together
+            masks = (masks @ colors).clip(0, 255)  # (h,w,n) @ (n,3) = (h,w,3)
+            self.im[:] = masks * alpha + self.im * (1 - s * alpha)
+        else:
+            if len(masks) == 0:
+                self.im[:] = im_gpu.permute(1, 2, 0).contiguous().cpu().numpy() * 255
+            colors = torch.tensor(colors, device=im_gpu.device, dtype=torch.float32) / 255.0
+            colors = colors[:, None, None]  # shape(n,1,1,3)
+            masks = masks.unsqueeze(3)  # shape(n,h,w,1)
+            masks_color = masks * (colors * alpha)  # shape(n,h,w,3)
+
+            inv_alph_masks = (1 - masks * alpha).cumprod(0)  # shape(n,h,w,1)
+            mcs = (masks_color * inv_alph_masks).sum(0) * 2  # mask color summand shape(n,h,w,3)
+
+            im_gpu = im_gpu.flip(dims=[0])  # flip channel
+            im_gpu = im_gpu.permute(1, 2, 0).contiguous()  # shape(h,w,3)
+            im_gpu = im_gpu * inv_alph_masks[-1] + mcs
+            im_mask = (im_gpu * 255).byte().cpu().numpy()
+            self.im[:] = scale_image(im_gpu.shape, im_mask, self.im.shape)
+        if self.pil:
+            # convert im back to PIL and update draw
+            self.fromarray(self.im)
+
     def rectangle(self, xy, fill=None, outline=None, width=1):
         # Add rectangle to image (PIL-only)
         self.draw.rectangle(xy, fill, outline, width)
@@ -181,7 +227,7 @@ def plot_img_and_mask(img, mask, index,epoch,save_dir):
     # plt.show()
     plt.savefig(save_dir+"/batch_{}_{}_seg.png".format(epoch,index))
 
-@threaded
+# @threaded
 def in_plot_images_and_masks(images, targets, masks, paths=None, fname='images.jpg', names=None):
     # Plot image grid with labels
     if isinstance(images, torch.Tensor):
@@ -205,7 +251,7 @@ def in_plot_images_and_masks(images, targets, masks, paths=None, fname='images.j
         if i == max_subplots:  # if last batch has fewer images than we expect
             break
         x, y = int(w * (i // ns)), int(h * (i % ns))  # block origin
-        im = im.transpose(1, 2, 0)
+        im = im.transpose(2, 1, 0)
         mosaic[y:y + h, x:x + w, :] = im
 
     # Resize (optional)
@@ -257,6 +303,7 @@ def in_plot_images_and_masks(images, targets, masks, paths=None, fname='images.j
                     image_masks = np.repeat(image_masks, nl, axis=0)
                     image_masks = np.where(image_masks == index, 1.0, 0.0)
                 else:
+                    # print("idx",len(idx))
                     image_masks = masks[idx]
 
                 im = np.asarray(annotator.im).copy()
@@ -273,6 +320,7 @@ def in_plot_images_and_masks(images, targets, masks, paths=None, fname='images.j
                         with contextlib.suppress(Exception):
                             im[y:y + h, x:x + w, :][mask] = im[y:y + h, x:x + w, :][mask] * 0.4 + np.array(color) * 0.6
                 annotator.fromarray(im)
+    # print("DONE")
     annotator.im.save(fname)  # save
 
 def show_seg_result(img, result, index, epoch, save_dir=None, is_ll=False,palette=None,is_demo=False,is_gt=False):

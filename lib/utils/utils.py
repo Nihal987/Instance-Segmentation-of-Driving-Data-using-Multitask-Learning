@@ -25,7 +25,7 @@ def create_logger(cfg, cfg_path, phase='train', rank=-1):
     cfg_path = os.path.basename(cfg_path).split('.')[0]
 
     if rank in [-1, 0]:
-        time_str = time.strftime('%Y-%m-%d-%H-%M')
+        time_str = time.strftime('%Y-%m-%d-%H-%M-%S')
         log_file = '{}_{}_{}.log'.format(cfg_path, time_str, phase)
         # set up tensorboard_log_dir
         tensorboard_log_dir = Path(cfg.LOG_DIR) / dataset / model / \
@@ -127,7 +127,7 @@ def save_checkpoint(epoch, name, model, optimizer, output_dir, filename, is_best
             'epoch': epoch,
             'model': name,
             'state_dict': model_state,
-            # 'best_state_dict': model.module.state_dict(),
+            'best_state_dict': model.module.state_dict() if is_parallel(model) else model.state_dict(),
             # 'perf': perf_indicator,
             'optimizer': optimizer.state_dict(),
         }

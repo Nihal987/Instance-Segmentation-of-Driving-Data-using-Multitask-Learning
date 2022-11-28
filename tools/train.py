@@ -284,6 +284,7 @@ def main():
     )
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if rank != -1 else None
 
+    batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
     train_loader = DataLoaderX(
         train_dataset,
         batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
@@ -306,6 +307,7 @@ def main():
             ])
         )
 
+        batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
         valid_loader = DataLoaderX(
             valid_dataset,
             batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
@@ -314,6 +316,7 @@ def main():
             pin_memory=cfg.PIN_MEMORY,
             collate_fn=dataset.AutoDriveDataset.collate_fn
         )
+        val_size = len(valid_loader)
         print('load data finished')
     
     if rank in [-1, 0]:

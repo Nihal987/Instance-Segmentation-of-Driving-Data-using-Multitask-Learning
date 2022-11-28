@@ -1,10 +1,11 @@
 import time
 from lib.core.evaluate import ConfusionMatrix,SegmentationMetric
-from lib.core.general import non_max_suppression,in_non_max_suppression,check_img_size,scale_coords,xyxy2xywh,xywh2xyxy,in_xywh2xyxy,box_iou,coco80_to_coco91_class,plot_images,ap_per_class,ap_per_class_box_and_mask,output_to_target,process_mask_upsample, mask_iou, in_box_iou
+from lib.core.general import non_max_suppression,in_non_max_suppression,check_img_size,scale_coords,xyxy2xywh,in_xyxy2xywh,xywh2xyxy,in_xywh2xyxy,box_iou,coco80_to_coco91_class,plot_images,ap_per_class,ap_per_class_box_and_mask,output_to_target,in_output_to_target,process_mask_upsample, mask_iou, in_box_iou
 from lib.utils.utils import time_synchronized
 from lib.utils.plot import plot_one_box, show_seg_result, in_plot_images_and_masks
 from lib.utils import is_parallel
 import torch
+import torch.nn.functional as F
 from threading import Thread
 import numpy as np
 from PIL import Image
@@ -50,6 +51,7 @@ def train(cfg, train_loader, model, criterion, optimizer, scaler, epoch, num_bat
     model.train()
     start = time.time()
     for i, (input, target, paths, shapes, masks) in enumerate(train_loader):
+        masks = masks.to(device)
         intermediate = time.time()
         #print('tims:{}'.format(intermediate-start))
         num_iter = i + num_batch * (epoch - 1)
@@ -117,7 +119,7 @@ def save_one_txt(predn, save_conf, shape, file):
     # Save one txt result
     gn = torch.tensor(shape)[[1, 0, 1, 0]]  # normalization gain whwh
     for *xyxy, conf, cls in predn.tolist():
-        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+        xywh = (in_xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
         with open(file, 'a') as f:
             f.write(('%g ' * len(line)).rstrip() % line + '\n')
@@ -262,6 +264,12 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             inf_out,train_out = det_out
             in_preds, protos, in_train_out = in_det_out
 
+            # for p in in_preds:
+            #     print("preds:",p.shape)
+            # print("protos:",protos.shape)
+            # print("img:",img.shape)
+            # for t in in_train_out:
+            #     print("train_out:",t.shape)
             #lane line segment evaluation
             _,ll_predict=torch.max(ll_seg_out, 1)
             _,ll_gt=torch.max(target[1], 1)
@@ -370,13 +378,17 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             # Masks
             midx = [si] if config.DATASET.OVERLAP else target[2][:, 0] == si
             gt_masks = masks[midx]
+            # print("PROTO",proto.shape)
+            # print("IN_PRED",in_pred.shape)
             pred_masks = process_mask_upsample(proto, in_pred[:, 6:], in_pred[:, :4], shape=img[si].shape[1:])
-            
+            # print("PRED_MASK 1",pred_masks.shape)
+
             # Predictions
             predn = pred.clone()
             scale_coords(img[si].shape[1:], predn[:, :4], shapes[si][0], shapes[si][1])  # native-space pred
             in_predn = in_pred.clone()
             scale_coords(img[si].shape[1:], in_predn[:, :4], shape, shapes[si][1])  # native-space pred
+            # print("in_predn after scale_coords:",in_predn.shape)
 
             # Assign all predictions as incorrect
             correct = torch.zeros(pred.shape[0], niou, dtype=torch.bool, device=device)
@@ -426,18 +438,20 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             in_stats.append((correct_masks, correct_bboxes, in_pred[:, 4], in_pred[:, 5], in_labels[:, 0]))  # (conf, pcls, tcls)
             
             pred_masks = torch.as_tensor(pred_masks, dtype=torch.uint8)
-            if config.TEST.PLOTS  and si < 3:
+            # print("PRED_MASK 2",pred_masks.shape)
+            if config.TEST.PLOTS  and batch_i < 3:
                 plot_masks.append(pred_masks[:15].cpu())  # filter top 15 to plot
+                # print("plot_masks list:",len(plot_masks))
 
-            # Append to text file
-            if config.TEST.SAVE_TXT:
-                gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
-                for *xyxy, conf, cls in predn.tolist():
-                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                    with open(save_dir / 'labels' / (path.stem + '.txt'), 'a') as f:
-                        f.write(('%g ' * len(line)).rstrip() % line + '\n')
-                save_one_txt(in_predn, save_conf, shape, file=save_dir / 'in_labels' / f'{path.stem}.txt')
+            # # Append to text file
+            # if config.TEST.SAVE_TXT:
+            #     gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
+            #     for *xyxy, conf, cls in predn.tolist():
+            #         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+            #         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
+            #         with open(save_dir / 'labels' / (path.stem + '.txt'), 'a') as f:
+            #             f.write(('%g ' * len(line)).rstrip() % line + '\n')
+            #     save_one_txt(in_predn, save_conf, shape, file=save_dir / 'in_labels' / f'{path.stem}.txt')
 
             # W&B logging
             if config.TEST.PLOTS and len(wandb_images) < log_imgs:
@@ -449,25 +463,36 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
                 boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
                 wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
 
-            # Append to pycocotools JSON dictionary
-            if config.TEST.SAVE_JSON:
-                # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
-                image_id = int(path.stem) if path.stem.isnumeric() else path.stem
-                box = xyxy2xywh(predn[:, :4])  # xywh
-                box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-                for p, b in zip(pred.tolist(), box.tolist()):
-                    jdict.append({'image_id': image_id,
-                                  'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
-                                  'bbox': [round(x, 3) for x in b],
-                                  'score': round(p[4], 5)})
+            # # Append to pycocotools JSON dictionary
+            # if config.TEST.SAVE_JSON:
+            #     # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
+            #     image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+            #     box = xyxy2xywh(predn[:, :4])  # xywh
+            #     box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+            #     for p, b in zip(pred.tolist(), box.tolist()):
+            #         jdict.append({'image_id': image_id,
+            #                       'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
+            #                       'bbox': [round(x, 3) for x in b],
+            #                       'score': round(p[4], 5)})
 
         if config.TEST.PLOTS and batch_i < 3:
             if len(plot_masks):
                 plot_masks = torch.cat(plot_masks, dim=0)
-            in_plot_images_and_masks(img, target[2], masks, paths, save_dir / f'val_batch{batch_i}_labels.jpg', in_names)
-            in_plot_images_and_masks(img, output_to_target(in_preds, max_det=15), plot_masks, paths,
-                                  save_dir / f'val_batch{batch_i}_pred.jpg', in_names)  # pred
-
+            print("LABELS OUTPUT")
+            # if masks.max() <= 1.0: 
+            #     continue
+            print("Target:",target[2].shape)
+            print("Masks:",masks.shape)
+            if masks.max() > 1.0:
+                in_plot_images_and_masks(img, target[2], masks, paths, save_dir + f'/val_batch{batch_i}_labels.jpg', in_names)
+            else:
+                print("***************DID NOT PRINT LABEL PLOT********************")
+            print("PREDS OUTPUT")
+            print("Target:",in_output_to_target(in_preds, max_det=15).shape)
+            print("Masks:",plot_masks.shape)
+            in_plot_images_and_masks(img, in_output_to_target(in_preds, max_det=15), plot_masks, paths,
+                                  save_dir + f'/val_batch{batch_i}_pred.jpg', in_names)  # pred
+            
 
     # Compute statistics
     # stats : [[all_img_correct]...[all_img_tcls]]
@@ -487,7 +512,7 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
     if len(in_stats) and in_stats[0].any():
         results = ap_per_class_box_and_mask(*in_stats, plot=config.TEST.PLOTS, save_dir=save_dir, names=in_names)
         in_metrics.update(results)
-    in_nt = np.bincount(stats[4].astype(int), minlength=in_nc)
+    in_nt = np.bincount(in_stats[4].astype(int), minlength=in_nc)
 
     # Print results
     pf = '%20s' + '%12.3g' * 6  # print format

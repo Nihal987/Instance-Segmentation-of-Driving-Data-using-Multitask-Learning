@@ -126,6 +126,7 @@ class AutoDriveDataset(Dataset):
         
         det_label = data["label"]
         labels=[]
+        masks = []
         
         if det_label.size > 0:
             # Normalized xywh to pixel xyxy format
@@ -188,7 +189,6 @@ class AutoDriveDataset(Dataset):
             masks = (torch.from_numpy(masks) if len(masks) else torch.zeros(1 if self.overlap else nl, img.shape[0] //
                                                                         self.downsample_ratio, img.shape[1] //
                                                                         self.downsample_ratio))
-
             # if self.is_train:
             # random left-right flip
             lr_flip = True
@@ -271,7 +271,10 @@ class AutoDriveDataset(Dataset):
 
         target = [labels_out, lane_label, in_labels_out]
         img = self.transform(img)
-
+        # print("img:",img.shape)
+        # print("labels_out:",labels_out.shape)
+        # print("shapes:",shapes)
+        # print("masks:",masks.shape)
         return img, target, data["image"], shapes, masks
 
     def select_data(self, db):
@@ -299,8 +302,6 @@ class AutoDriveDataset(Dataset):
             label_det.append(l_det)
             label_lane.append(l_lane)
             in_label_seg.append(in_l_seg)
-            det = l_det.shape
-            ins = in_l_seg.shape
-            lane = l_lane.shape
+
         return torch.stack(img, 0), [torch.cat(label_det, 0), torch.stack(label_lane, 0), torch.cat(in_label_seg, 0)], paths, shapes, batched_masks
 
