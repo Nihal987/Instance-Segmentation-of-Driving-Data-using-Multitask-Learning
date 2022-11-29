@@ -284,7 +284,6 @@ def main():
     )
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if rank != -1 else None
 
-    batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
     train_loader = DataLoaderX(
         train_dataset,
         batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
@@ -307,7 +306,6 @@ def main():
             ])
         )
 
-        batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
         valid_loader = DataLoaderX(
             valid_dataset,
             batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
@@ -316,7 +314,6 @@ def main():
             pin_memory=cfg.PIN_MEMORY,
             collate_fn=dataset.AutoDriveDataset.collate_fn
         )
-        val_size = len(valid_loader)
         print('load data finished')
     
     if rank in [-1, 0]:
@@ -357,7 +354,7 @@ def main():
             msg = 'Epoch: [{0}]    Loss({loss:.3f})\n' \
                       'Lane line Segment: Acc({ll_seg_acc:.3f})    IOU ({ll_seg_iou:.3f})  mIOU({ll_seg_miou:.3f})\n' \
                       'Detect: P({p:.3f})  R({r:.3f})  mAP@0.5({map50:.3f})  mAP@0.5:0.95({map:.3f})\n'\
-                      'in_Detect: P({in_p:.3f})  R({in_r:.3f})  mAP@0.5({in_map50:.3f})  mAP@0.5:0.95({in_map:.3f})\n'\
+                      'Instance Segmentation: P({in_p:.3f})  R({in_r:.3f})  mAP@0.5({in_map50:.3f})  mAP@0.5:0.95({in_map:.3f})\n'\
                       'Mask: P({mask_p:.3f})  R({mask_r:.3f})  mAP@0.5({mask_map50:.3f})  mAP@0.5:0.95({mask_map:.3f})\n'\
                       'Time: inference({t_inf:.4f}s/frame)  nms({t_nms:.4f}s/frame)'.format(
                           epoch,  loss=total_loss,

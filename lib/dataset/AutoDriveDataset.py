@@ -101,13 +101,11 @@ class AutoDriveDataset(Dataset):
         """
         data = self.db[idx]
         img = cv2.imread(data["image"], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        
         # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         # seg_label = cv2.imread(data["mask"], 0)
         lane_label = cv2.imread(data["lane"], 0)
-        #print(lane_label.shape)
-        # print(seg_label.shape)
-        # print(lane_label.shape)
-        # print(seg_label.shape)
+
         resized_shape = self.inputsize
         if isinstance(resized_shape, list):
             resized_shape = max(resized_shape)
@@ -118,6 +116,7 @@ class AutoDriveDataset(Dataset):
             img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
             lane_label = cv2.resize(lane_label, (int(w0 * r), int(h0 * r)), interpolation=interp)
         h, w = img.shape[:2]
+        
         
         (img, lane_label), ratio, pad = letterbox((img, lane_label), resized_shape, auto=True, scaleup=self.is_train)
         shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
@@ -165,6 +164,7 @@ class AutoDriveDataset(Dataset):
             #print(labels.shape)
             augment_hsv(img, hgain=self.cfg.DATASET.HSV_H, sgain=self.cfg.DATASET.HSV_S, vgain=self.cfg.DATASET.HSV_V)
             # img, seg_label, labels = cutout(combination=combination, labels=labels)
+            # print("Img shape",img.shape)
 
             if len(labels):
                 # convert xyxy to xywh
@@ -197,6 +197,7 @@ class AutoDriveDataset(Dataset):
                 lane_label = np.fliplr(lane_label)
                 if len(labels):
                     labels[:, 1] = 1 - labels[:, 1]
+                if len(in_labels):
                     in_labels[:, 1] = 1 - in_labels[:, 1]
                     masks = torch.flip(masks, dims=[2])
 
@@ -207,6 +208,7 @@ class AutoDriveDataset(Dataset):
                 lane_label = np.flipud(lane_label)
                 if len(labels):
                     labels[:, 2] = 1 - labels[:, 2]
+                if len(in_labels):
                     in_labels[:, 2] = 1 - in_labels[:, 2]
                     masks = torch.flip(masks, dims=[1])
         
@@ -270,6 +272,7 @@ class AutoDriveDataset(Dataset):
         
 
         target = [labels_out, lane_label, in_labels_out]
+
         img = self.transform(img)
         # print("img:",img.shape)
         # print("labels_out:",labels_out.shape)

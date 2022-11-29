@@ -251,7 +251,7 @@ def in_plot_images_and_masks(images, targets, masks, paths=None, fname='images.j
         if i == max_subplots:  # if last batch has fewer images than we expect
             break
         x, y = int(w * (i // ns)), int(h * (i % ns))  # block origin
-        im = im.transpose(2, 1, 0)
+        im = im.transpose(1, 2, 0)
         mosaic[y:y + h, x:x + w, :] = im
 
     # Resize (optional)
@@ -271,6 +271,7 @@ def in_plot_images_and_masks(images, targets, masks, paths=None, fname='images.j
             annotator.text((x + 5, y + 5 + h), text=Path(paths[i]).name[:40], txt_color=(220, 220, 220))  # filenames
         if len(targets) > 0:
             idx = targets[:, 0] == i
+            # print(f'idx{idx} target{targets} i:{i}')
             ti = targets[idx]  # image targets
 
             boxes = in_xywh2xyxy(ti[:, 2:6]).T
@@ -303,7 +304,6 @@ def in_plot_images_and_masks(images, targets, masks, paths=None, fname='images.j
                     image_masks = np.repeat(image_masks, nl, axis=0)
                     image_masks = np.where(image_masks == index, 1.0, 0.0)
                 else:
-                    # print("idx",len(idx))
                     image_masks = masks[idx]
 
                 im = np.asarray(annotator.im).copy()
@@ -314,13 +314,12 @@ def in_plot_images_and_masks(images, targets, masks, paths=None, fname='images.j
                         if mh != h or mw != w:
                             mask = image_masks[j].astype(np.uint8)
                             mask = cv2.resize(mask, (w, h))
-                            mask = mask.astype(np.bool)
+                            mask = mask.astype(bool)
                         else:
-                            mask = image_masks[j].astype(np.bool)
+                            mask = image_masks[j].astype(bool)
                         with contextlib.suppress(Exception):
                             im[y:y + h, x:x + w, :][mask] = im[y:y + h, x:x + w, :][mask] * 0.4 + np.array(color) * 0.6
                 annotator.fromarray(im)
-    # print("DONE")
     annotator.im.save(fname)  # save
 
 def show_seg_result(img, result, index, epoch, save_dir=None, is_ll=False,palette=None,is_demo=False,is_gt=False):

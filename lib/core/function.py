@@ -478,18 +478,18 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
         if config.TEST.PLOTS and batch_i < 3:
             if len(plot_masks):
                 plot_masks = torch.cat(plot_masks, dim=0)
-            print("LABELS OUTPUT")
-            # if masks.max() <= 1.0: 
-            #     continue
-            print("Target:",target[2].shape)
-            print("Masks:",masks.shape)
+            # print("LABELS OUTPUT")
+            # # if masks.max() <= 1.0: 
+            # #     continue
+            # print("Target:",target[2].shape)
+            # print("Masks:",masks.shape)
             if masks.max() > 1.0:
                 in_plot_images_and_masks(img, target[2], masks, paths, save_dir + f'/val_batch{batch_i}_labels.jpg', in_names)
             else:
                 print("***************DID NOT PRINT LABEL PLOT********************")
-            print("PREDS OUTPUT")
-            print("Target:",in_output_to_target(in_preds, max_det=15).shape)
-            print("Masks:",plot_masks.shape)
+            # print("PREDS OUTPUT")
+            # print("Target:",in_output_to_target(in_preds, max_det=15).shape)
+            # print("Masks:",plot_masks.shape)
             in_plot_images_and_masks(img, in_output_to_target(in_preds, max_det=15), plot_masks, paths,
                                   save_dir + f'/val_batch{batch_i}_pred.jpg', in_names)  # pred
             
