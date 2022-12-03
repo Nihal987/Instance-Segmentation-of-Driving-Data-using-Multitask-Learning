@@ -14,6 +14,7 @@ from pathlib import Path
 import json
 import random
 import cv2
+import sys
 import os
 import math
 from torch.cuda import amp
@@ -77,6 +78,20 @@ def train(cfg, train_loader, model, criterion, optimizer, scaler, epoch, num_bat
             target = assign_target
         with amp.autocast(enabled=device.type != 'cpu'):
             outputs = model(input)
+            torch.set_printoptions(threshold=sys.maxsize)
+            # print("pred:",type(outputs[2]))
+            # p,proto = outputs[2]
+            # print("proto shape:",proto.shape)
+            # print("masks:",masks)
+            # print("target",target[2])
+            # print("\nTRAINING")
+            # print("mask max:",masks.max())
+            # if masks.max() <= 1.0:
+            #     print("\n$$$$$$$$$$$$$$$$$$$$$$")
+            # else:
+            #     print("\n*************None")
+            # print("targets:",target[2])
+
             total_loss, head_losses = criterion(outputs, target, shapes, model, masks)
             # print(head_losses)
 
@@ -249,6 +264,11 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             masks = masks.float()
             nb, _, height, width = img.shape    #batch size, channel, height, width
 
+        # print("\nmasks:",masks)
+        # if masks.max() <= 1.0:
+        #     print("\n$$$$$$$$$$$$$$$$$$$$$$")
+        # else:
+        #     print("\n*************None")
         with torch.no_grad():
             pad_w, pad_h = shapes[0][1][1]
             pad_w = int(pad_w)
@@ -444,14 +464,14 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
                 # print("plot_masks list:",len(plot_masks))
 
             # # Append to text file
-            # if config.TEST.SAVE_TXT:
-            #     gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
-            #     for *xyxy, conf, cls in predn.tolist():
-            #         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-            #         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-            #         with open(save_dir / 'labels' / (path.stem + '.txt'), 'a') as f:
-            #             f.write(('%g ' * len(line)).rstrip() % line + '\n')
-            #     save_one_txt(in_predn, save_conf, shape, file=save_dir / 'in_labels' / f'{path.stem}.txt')
+            if config.TEST.SAVE_TXT:
+                gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
+                for *xyxy, conf, cls in predn.tolist():
+                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                    line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
+                    with open(save_dir / 'labels' / (path.stem + '.txt'), 'a') as f:
+                        f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                save_one_txt(in_predn, save_conf, shape, file=save_dir / 'in_labels' / f'{path.stem}.txt')
 
             # W&B logging
             if config.TEST.PLOTS and len(wandb_images) < log_imgs:
@@ -464,29 +484,24 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
                 wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
 
             # # Append to pycocotools JSON dictionary
-            # if config.TEST.SAVE_JSON:
-            #     # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
-            #     image_id = int(path.stem) if path.stem.isnumeric() else path.stem
-            #     box = xyxy2xywh(predn[:, :4])  # xywh
-            #     box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-            #     for p, b in zip(pred.tolist(), box.tolist()):
-            #         jdict.append({'image_id': image_id,
-            #                       'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
-            #                       'bbox': [round(x, 3) for x in b],
-            #                       'score': round(p[4], 5)})
+            if config.TEST.SAVE_JSON:
+                # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
+                image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+                box = xyxy2xywh(predn[:, :4])  # xywh
+                box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+                for p, b in zip(pred.tolist(), box.tolist()):
+                    jdict.append({'image_id': image_id,
+                                  'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
+                                  'bbox': [round(x, 3) for x in b],
+                                  'score': round(p[4], 5)})
 
         if config.TEST.PLOTS and batch_i < 3:
             if len(plot_masks):
                 plot_masks = torch.cat(plot_masks, dim=0)
             # print("LABELS OUTPUT")
-            # # if masks.max() <= 1.0: 
-            # #     continue
             # print("Target:",target[2].shape)
             # print("Masks:",masks.shape)
-            if masks.max() > 1.0:
-                in_plot_images_and_masks(img, target[2], masks, paths, save_dir + f'/val_batch{batch_i}_labels.jpg', in_names)
-            else:
-                print("***************DID NOT PRINT LABEL PLOT********************")
+            in_plot_images_and_masks(img, target[2], masks, paths, save_dir + f'/val_batch{batch_i}_labels.jpg', in_names)
             # print("PREDS OUTPUT")
             # print("Target:",in_output_to_target(in_preds, max_det=15).shape)
             # print("Masks:",plot_masks.shape)

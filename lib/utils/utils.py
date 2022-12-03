@@ -3,12 +3,13 @@ import logging
 import time
 from collections import namedtuple
 from pathlib import Path
-
+import random
 import torch
 import torch.optim as optim
 import torch.nn as nn
 import numpy as np
 from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset, dataloader, distributed
 from prefetch_generator import BackgroundGenerator
 from contextlib import contextmanager
 import re
@@ -173,6 +174,45 @@ class DataLoaderX(DataLoader):
     """prefetch dataloader"""
     def __iter__(self):
         return BackgroundGenerator(super().__iter__())
+
+class InfiniteDataLoader(dataloader.DataLoader):
+    """ Dataloader that reuses workers
+
+    Uses same syntax as vanilla DataLoader
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        object.__setattr__(self, 'batch_sampler', _RepeatSampler(self.batch_sampler))
+        self.iterator = super().__iter__()
+
+    def __len__(self):
+        return len(self.batch_sampler.sampler)
+
+    def __iter__(self):
+        for _ in range(len(self)):
+            yield next(self.iterator)
+
+
+class _RepeatSampler:
+    """ Sampler that repeats forever
+
+    Args:
+        sampler (Sampler)
+    """
+
+    def __init__(self, sampler):
+        self.sampler = sampler
+
+    def __iter__(self):
+        while True:
+            yield from iter(self.sampler)
+
+def seed_worker(worker_id):
+    # Set dataloader worker seed https://pytorch.org/docs/stable/notes/randomness.html#dataloader
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 @contextmanager
 def torch_distributed_zero_first(local_rank: int):

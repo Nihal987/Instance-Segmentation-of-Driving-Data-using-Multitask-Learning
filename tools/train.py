@@ -17,7 +17,7 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import numpy as np
-from lib.utils import DataLoaderX, torch_distributed_zero_first
+from lib.utils import DataLoaderX, torch_distributed_zero_first, InfiniteDataLoader,seed_worker
 from tensorboardX import SummaryWriter
 
 import lib.dataset as dataset
@@ -110,7 +110,6 @@ def main():
     # DP mode
     device = select_device(logger, batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU* len(cfg.GPUS)) if not cfg.DEBUG \
         else select_device(logger, 'cpu')
-
     if args.local_rank != -1:
         assert torch.cuda.device_count() > args.local_rank
         torch.cuda.set_device(args.local_rank)
@@ -151,16 +150,16 @@ def main():
         checkpoint_file = os.path.join(
             os.path.join(cfg.LOG_DIR, cfg.DATASET.DATASET), 'checkpoint.pth'
         )
-        if os.path.exists(cfg.MODEL.PRETRAINED):
-            logger.info("=> loading model '{}'".format(cfg.MODEL.PRETRAINED))
-            checkpoint = torch.load(cfg.MODEL.PRETRAINED)
-            begin_epoch = checkpoint['epoch']
-            # best_perf = checkpoint['perf']
-            last_epoch = checkpoint['epoch']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            logger.info("=> loaded checkpoint '{}' (epoch {})".format(
-                cfg.MODEL.PRETRAINED, checkpoint['epoch']))
+        # if os.path.exists(cfg.MODEL.PRETRAINED):
+        #     logger.info("=> loading model '{}'".format(cfg.MODEL.PRETRAINED))
+        #     checkpoint = torch.load(cfg.MODEL.PRETRAINED)
+        #     begin_epoch = checkpoint['epoch']
+        #     # best_perf = checkpoint['perf']
+        #     last_epoch = checkpoint['epoch']
+        #     model.load_state_dict(checkpoint['state_dict'])
+        #     optimizer.load_state_dict(checkpoint['optimizer'])
+        #     logger.info("=> loaded checkpoint '{}' (epoch {})".format(
+        #         cfg.MODEL.PRETRAINED, checkpoint['epoch']))
             #cfg.NEED_AUTOANCHOR = False     #disable autoanchor
         
         if os.path.exists(cfg.MODEL.PRETRAINED_DET):
@@ -282,8 +281,21 @@ def main():
             normalize,
         ])
     )
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if rank != -1 else None
-
+    train_sampler = None if rank == -1 else torch.utils.data.distributed.DistributedSampler(dataset, shuffle=cfg.TRAIN.SHUFFLE)
+    generator = torch.Generator()
+    generator.manual_seed(6148914691236517205 + rank)
+    # train_loader = InfiniteDataLoader(
+    #             train_dataset,
+    #             batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
+    #             shuffle=(cfg.TRAIN.SHUFFLE and train_sampler is None),
+    #             num_workers=cfg.WORKERS,
+    #             sampler=train_sampler,
+    #             pin_memory=cfg.PIN_MEMORY,
+    #             collate_fn=dataset.AutoDriveDataset.collate_fn,
+    #             worker_init_fn=seed_worker,
+    #             generator=generator
+    # )
+    
     train_loader = DataLoaderX(
         train_dataset,
         batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
@@ -306,6 +318,18 @@ def main():
             ])
         )
 
+        # valid_loader = InfiniteDataLoader(
+        #         valid_dataset,
+        #         batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
+        #         shuffle=False,
+        #         num_workers=cfg.WORKERS,
+        #         sampler=None,
+        #         pin_memory=cfg.PIN_MEMORY,
+        #         collate_fn=dataset.AutoDriveDataset.collate_fn,
+        #         worker_init_fn=seed_worker,
+        #         generator=generator
+        # )
+        
         valid_loader = DataLoaderX(
             valid_dataset,
             batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS),

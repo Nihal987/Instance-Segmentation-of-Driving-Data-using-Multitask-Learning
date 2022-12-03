@@ -34,7 +34,7 @@ class BddDataset(AutoDriveDataset):
         height, width = self.shapes
         for lane in tqdm(list(self.lane_list)):
             lane_path = str(lane)
-            if lane_path == 'bdd_small/ll_seg_annotations/train/.DS_Store':
+            if lane_path.endswith('.DS_Store'):
                 continue
             label_path = lane_path.replace(str(self.lane_root), str(self.label_root)).replace(".png", ".json")
             image_path = lane_path.replace(str(self.lane_root), str(self.img_root)).replace(".png", ".jpg")
@@ -84,7 +84,6 @@ class BddDataset(AutoDriveDataset):
                     msg = f'WARNING: {image_path}: {nl - len(i)} duplicate labels removed'
                     print(msg)
                 
-
             rec = [{
                 'image': image_path,
                 'label': gt,

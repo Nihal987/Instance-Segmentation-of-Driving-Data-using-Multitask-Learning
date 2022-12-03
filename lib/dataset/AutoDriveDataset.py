@@ -1,4 +1,5 @@
 import cv2
+import sys
 import numpy as np
 # np.set_printoptions(threshold=np.inf)
 import random
@@ -135,8 +136,11 @@ class AutoDriveDataset(Dataset):
             labels[:, 3] = ratio[0] * w * (det_label[:, 1] + det_label[:, 3] / 2) + pad[0]
             labels[:, 4] = ratio[1] * h * (det_label[:, 2] + det_label[:, 4] / 2) + pad[1]
         
-        in_labels = data["in_label"]        
-        segments = data["in_segments"]
+        in_labels = data["in_label"].copy()      
+        segments = data["in_segments"].copy()
+        # print("\nFROM GET_ITEM()")
+        # torch.set_printoptions(threshold=sys.maxsize)
+        # print("\nin_labels:",in_labels)
         if len(segments):
                 for i_s in range(len(segments)):
                     segments[i_s] = xyn2xy(
@@ -145,7 +149,7 @@ class AutoDriveDataset(Dataset):
                         ratio[1] * h,
                         padw=pad[0],
                         padh=pad[1],
-                    )
+                    )    
         if in_labels.size:  # normalized xywh to pixel xyxy format
             in_labels[:, 1:] = xywhn2xyxy(in_labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
             
@@ -161,10 +165,7 @@ class AutoDriveDataset(Dataset):
                 scale=self.cfg.DATASET.SCALE_FACTOR,
                 shear=self.cfg.DATASET.SHEAR
             )
-            #print(labels.shape)
             augment_hsv(img, hgain=self.cfg.DATASET.HSV_H, sgain=self.cfg.DATASET.HSV_S, vgain=self.cfg.DATASET.HSV_V)
-            # img, seg_label, labels = cutout(combination=combination, labels=labels)
-            # print("Img shape",img.shape)
 
             if len(labels):
                 # convert xyxy to xywh
@@ -192,7 +193,7 @@ class AutoDriveDataset(Dataset):
             # if self.is_train:
             # random left-right flip
             lr_flip = True
-            if lr_flip and random.random() < 0.5:
+            if lr_flip:# and random.random() < 0.5:
                 img = np.fliplr(img)
                 lane_label = np.fliplr(lane_label)
                 if len(labels):
@@ -202,7 +203,7 @@ class AutoDriveDataset(Dataset):
                     masks = torch.flip(masks, dims=[2])
 
             # random up-down flip
-            ud_flip = True
+            ud_flip = False
             if ud_flip and random.random() < 0.5:
                 img = np.flipud(img)
                 lane_label = np.flipud(lane_label)
@@ -278,6 +279,12 @@ class AutoDriveDataset(Dataset):
         # print("labels_out:",labels_out.shape)
         # print("shapes:",shapes)
         # print("masks:",masks.shape)
+        # print("FROM GET_ITEM()")
+        # torch.set_printoptions(threshold=sys.maxsize)
+        # print("\nin_labels_out:",in_labels_out)
+        # print("segments:",segments)
+        # print("masks:",masks)
+        # print("shapes:",shapes)
         return img, target, data["image"], shapes, masks
 
     def select_data(self, db):

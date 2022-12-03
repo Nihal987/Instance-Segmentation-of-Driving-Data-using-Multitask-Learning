@@ -46,7 +46,7 @@ def random_perspective(combination, in_labels, targets=(), segments=(), degrees=
     C = np.eye(3)
     C[0, 2] = -img.shape[1] / 2  # x translation (pixels)
     C[1, 2] = -img.shape[0] / 2  # y translation (pixels)
-
+    
     # Perspective
     P = np.eye(3)
     P[2, 0] = random.uniform(-perspective, perspective)  # x perspective (about y)

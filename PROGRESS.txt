@@ -1,7 +1,6 @@
 This code was built for:
 1. vehcile detection
-2. Drivable Area Semantic Segmentation
+2. Instance Segmentation of Drivable Area
 3. Lane Line Semantic Segmentation
-4. Instance Segmentation of Drivable Area
-5. The Model has not been done
-6. Dataloaders, tran and val code have been done
+
+Need to test how it performs after training
