@@ -252,6 +252,7 @@ def in_plot_images_and_masks(images, targets, masks, paths=None, fname='images.j
             break
         x, y = int(w * (i // ns)), int(h * (i % ns))  # block origin
         im = im.transpose(1, 2, 0)
+        im = im[:,:,::-1]
         mosaic[y:y + h, x:x + w, :] = im
 
     # Resize (optional)

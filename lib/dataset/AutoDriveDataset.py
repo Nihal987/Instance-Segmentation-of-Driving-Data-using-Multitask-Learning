@@ -101,7 +101,7 @@ class AutoDriveDataset(Dataset):
         cv2.warpAffine
         """
         data = self.db[idx]
-        img = cv2.imread(data["image"], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        img = cv2.imread(data["image"])
         
         # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         # seg_label = cv2.imread(data["mask"], 0)
@@ -245,9 +245,11 @@ class AutoDriveDataset(Dataset):
         in_labels_out = torch.zeros((nl, 6))
         if nl:
             in_labels_out[:, 1:] = torch.from_numpy(in_labels)
-        # Convert
-        # img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
-        # img = img.transpose(2, 0, 1)
+
+        plt_img = img.copy() # To show Instance Segmentation plots
+        plt_img = plt_img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+        plt_img = np.ascontiguousarray(plt_img)
+
         img = np.ascontiguousarray(img)
         # seg_label = np.ascontiguousarray(seg_label)
         # if idx == 0:
@@ -275,17 +277,8 @@ class AutoDriveDataset(Dataset):
         target = [labels_out, lane_label, in_labels_out]
 
         img = self.transform(img)
-        # print("img:",img.shape)
-        # print("labels_out:",labels_out.shape)
-        # print("shapes:",shapes)
-        # print("masks:",masks.shape)
-        # print("FROM GET_ITEM()")
-        # torch.set_printoptions(threshold=sys.maxsize)
-        # print("\nin_labels_out:",in_labels_out)
-        # print("segments:",segments)
-        # print("masks:",masks)
-        # print("shapes:",shapes)
-        return img, target, data["image"], shapes, masks
+        
+        return img, torch.from_numpy(plt_img), target, data["image"], shapes, masks
 
     def select_data(self, db):
         """
@@ -302,7 +295,7 @@ class AutoDriveDataset(Dataset):
 
     @staticmethod
     def collate_fn(batch):
-        img, label, paths, shapes, masks= zip(*batch)
+        img,plt_img, label, paths, shapes, masks= zip(*batch)
         label_det, label_lane, in_label_seg = [], [], []
         batched_masks = torch.cat(masks, 0)
         for i, l in enumerate(label):
@@ -313,5 +306,5 @@ class AutoDriveDataset(Dataset):
             label_lane.append(l_lane)
             in_label_seg.append(in_l_seg)
 
-        return torch.stack(img, 0), [torch.cat(label_det, 0), torch.stack(label_lane, 0), torch.cat(in_label_seg, 0)], paths, shapes, batched_masks
+        return torch.stack(img, 0),torch.stack(plt_img, 0), [torch.cat(label_det, 0), torch.stack(label_lane, 0), torch.cat(in_label_seg, 0)], paths, shapes, batched_masks
 

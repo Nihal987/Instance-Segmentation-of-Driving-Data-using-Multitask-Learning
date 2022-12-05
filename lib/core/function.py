@@ -51,7 +51,7 @@ def train(cfg, train_loader, model, criterion, optimizer, scaler, epoch, num_bat
     # switch to train mode
     model.train()
     start = time.time()
-    for i, (input, target, paths, shapes, masks) in enumerate(train_loader):
+    for i, (input,plt_img, target, paths, shapes, masks) in enumerate(train_loader):
         masks = masks.to(device)
         intermediate = time.time()
         #print('tims:{}'.format(intermediate-start))
@@ -253,7 +253,7 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
     model.eval()
     jdict, stats, in_stats, ap, ap_class, wandb_images = [], [], [], [], [], []
 
-    for batch_i, (img, target, paths, shapes, masks) in tqdm(enumerate(val_loader), total=len(val_loader)):
+    for batch_i, (img, plt_img, target, paths, shapes, masks) in tqdm(enumerate(val_loader), total=len(val_loader)):
         if not config.DEBUG:
             img = img.to(device, non_blocking=True)
             assign_target = []
@@ -501,11 +501,11 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
             # print("LABELS OUTPUT")
             # print("Target:",target[2].shape)
             # print("Masks:",masks.shape)
-            in_plot_images_and_masks(img, target[2], masks, paths, save_dir + f'/val_batch{batch_i}_labels.jpg', in_names)
+            in_plot_images_and_masks(plt_img, target[2], masks, paths, save_dir + f'/val_batch{batch_i}_labels.jpg', in_names)
             # print("PREDS OUTPUT")
             # print("Target:",in_output_to_target(in_preds, max_det=15).shape)
             # print("Masks:",plot_masks.shape)
-            in_plot_images_and_masks(img, in_output_to_target(in_preds, max_det=15), plot_masks, paths,
+            in_plot_images_and_masks(plt_img, in_output_to_target(in_preds, max_det=15), plot_masks, paths,
                                   save_dir + f'/val_batch{batch_i}_pred.jpg', in_names)  # pred
             
 
