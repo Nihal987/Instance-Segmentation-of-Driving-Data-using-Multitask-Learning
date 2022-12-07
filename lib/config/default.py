@@ -8,7 +8,7 @@ _C.LOG_DIR = 'runs/'
 _C.GPUS = [0]     
 _C.WORKERS = 0
 _C.PIN_MEMORY = True
-_C.PRINT_FREQ = 8
+_C.PRINT_FREQ = 100
 _C.AUTO_RESUME =True       # Resume from the last training interrupt
 _C.NEED_AUTOANCHOR = False      # Re-select the prior anchor(k-means)    When training from scratch (epoch=0), set it to be ture!
 _C.DEBUG = False
