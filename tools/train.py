@@ -368,9 +368,8 @@ def main():
         if (epoch % cfg.TRAIN.VAL_FREQ == 0 or epoch == cfg.TRAIN.END_EPOCH) and rank in [-1, 0]:
             # print('validate')
             ll_segment_results,detect_results, total_loss,in_results,maps, times = validate(
-                epoch,cfg, valid_loader, valid_dataset, model, criterion,valid_loader,
-                final_output_dir, tb_log_dir, writer_dict,
-                logger, device, rank
+                epoch,cfg, valid_loader, model, criterion, final_output_dir, 
+                tb_log_dir, writer_dict, logger, device, rank
             )
             fi = fitness(np.array(detect_results).reshape(1, -1))  
             in_fi = in_fitness(np.array(in_results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
@@ -402,19 +401,19 @@ def main():
         
         # save checkpoint model and best model
         if rank in [-1, 0]:
-            savepath = os.path.join(final_output_dir, f'epoch-{epoch}.pth')
-            logger.info('=> saving checkpoint to {}'.format(savepath))
-            save_checkpoint(
-                epoch=epoch,
-                name=cfg.MODEL.NAME,
-                model=model,
-                # 'best_state_dict': model.module.state_dict(),
-                # 'perf': perf_indicator,
-                optimizer=optimizer,
-                output_dir=final_output_dir,
-                filename=f'epoch-{epoch}.pth',
-                is_best=is_bestfit
-            )
+            # savepath = os.path.join(final_output_dir, f'epoch-{epoch}.pth')
+            # logger.info('=> saving checkpoint to {}'.format(savepath))
+            # save_checkpoint(
+            #     epoch=epoch,
+            #     name=cfg.MODEL.NAME,
+            #     model=model,
+            #     # 'best_state_dict': model.module.state_dict(),
+            #     # 'perf': perf_indicator,
+            #     optimizer=optimizer,
+            #     output_dir=final_output_dir,
+            #     filename=f'epoch-{epoch}.pth',
+            #     is_best=is_bestfit
+            # )
             save_checkpoint(
                 epoch=epoch,
                 name=cfg.MODEL.NAME,

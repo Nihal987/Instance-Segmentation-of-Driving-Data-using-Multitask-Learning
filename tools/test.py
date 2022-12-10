@@ -36,7 +36,7 @@ def parse_args():
                         help='log directory',
                         type=str,
                         default='runs/')
-    parser.add_argument('--weights', nargs='+', type=str, default='/data2/zwt/wd/YOLOP/runs/BddDataset/detect_and_segbranch_whole/epoch-169.pth', help='model.pth path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='runs/BddDataset/checkpoint.pth', help='model.pth path(s)')
     parser.add_argument('--conf_thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou_thres', type=float, default=0.6, help='IOU threshold for NMS')
     args = parser.parse_args()
@@ -73,9 +73,6 @@ def main():
 
     model = get_net(cfg)
     print("finish build model")
-    
-    # define loss function (criterion) and optimizer
-    criterion = get_loss(cfg, device=device)
 
     # load checkpoint model
 
@@ -93,6 +90,10 @@ def main():
     model = model.to(device)
     model.gr = 1.0
     model.nc = 1
+
+    # define loss function (criterion) and optimizer
+    criterion = get_loss(cfg, model, device=device)
+
     print('bulid model finished')
 
     print("begin to load data")
@@ -130,21 +131,24 @@ def main():
     print('load data finished')
 
     epoch = 0 #special for test
-    da_segment_results,ll_segment_results,detect_results, total_loss,maps, times = validate(
-        epoch,cfg, valid_loader, valid_dataset, model, criterion,
+    ll_segment_results, detect_results, total_loss, in_results, maps, times = validate(
+        epoch, cfg, valid_loader, model, criterion,
         final_output_dir, tb_log_dir, writer_dict,
         logger, device
     )
     fi = fitness(np.array(detect_results).reshape(1, -1))
-    msg =   'Test:    Loss({loss:.3f})\n' \
-            'Driving area Segment: Acc({da_seg_acc:.3f})    IOU ({da_seg_iou:.3f})    mIOU({da_seg_miou:.3f})\n' \
-                      'Lane line Segment: Acc({ll_seg_acc:.3f})    IOU ({ll_seg_iou:.3f})  mIOU({ll_seg_miou:.3f})\n' \
-                      'Detect: P({p:.3f})  R({r:.3f})  mAP@0.5({map50:.3f})  mAP@0.5:0.95({map:.3f})\n'\
-                      'Time: inference({t_inf:.4f}s/frame)  nms({t_nms:.4f}s/frame)'.format(
-                          loss=total_loss, da_seg_acc=da_segment_results[0],da_seg_iou=da_segment_results[1],da_seg_miou=da_segment_results[2],
-                          ll_seg_acc=ll_segment_results[0],ll_seg_iou=ll_segment_results[1],ll_seg_miou=ll_segment_results[2],
-                          p=detect_results[0],r=detect_results[1],map50=detect_results[2],map=detect_results[3],
-                          t_inf=times[0], t_nms=times[1])
+    msg = 'Epoch: [{0}]    Loss({loss:.3f})\n' \
+        'Lane line Segment: Acc({ll_seg_acc:.3f})    IOU ({ll_seg_iou:.3f})  mIOU({ll_seg_miou:.3f})\n' \
+        'Detect: P({p:.3f})  R({r:.3f})  mAP@0.5({map50:.3f})  mAP@0.5:0.95({map:.3f})\n'\
+        'Instance Segmentation: P({in_p:.3f})  R({in_r:.3f})  mAP@0.5({in_map50:.3f})  mAP@0.5:0.95({in_map:.3f})\n'\
+        'Mask: P({mask_p:.3f})  R({mask_r:.3f})  mAP@0.5({mask_map50:.3f})  mAP@0.5:0.95({mask_map:.3f})\n'\
+        'Time: inference({t_inf:.4f}s/frame)  nms({t_nms:.4f}s/frame)'.format(
+        epoch,  loss=total_loss,
+        ll_seg_acc=ll_segment_results[0],ll_seg_iou=ll_segment_results[1],ll_seg_miou=ll_segment_results[2],
+        p=detect_results[0],r=detect_results[1],map50=detect_results[2],map=detect_results[3],
+        in_p=in_results[0],in_r=in_results[1],in_map50=in_results[2],in_map=in_results[3],
+        mask_p=in_results[4],mask_r=in_results[5],mask_map50=in_results[6],mask_map=in_results[7],
+        t_inf=times[0], t_nms=times[1])
     logger.info(msg)
     print("test finish")
 

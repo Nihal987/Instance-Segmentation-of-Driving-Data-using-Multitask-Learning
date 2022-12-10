@@ -176,7 +176,7 @@ def process_batch(detections, labels, iouv, pred_masks=None, gt_masks=None, over
             correct[matches[:, 1].astype(int), i] = True
     return torch.tensor(correct, dtype=torch.bool, device=iouv.device)
 
-def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader,output_dir,
+def validate(epoch,config, val_loader, model, criterion, output_dir,
              tb_log_dir, writer_dict=None, logger=None, device='cpu', rank=-1):
     """
     validata
@@ -607,7 +607,7 @@ def validate(epoch,config, val_loader, val_dataset, model, criterion, dataloader
     # print('mp:{},mr:{},map50:{},map:{}'.format(mp, mr, map50, map))
     #print segmet_result
     t = [T_inf.avg, T_nms.avg]
-    return ll_segment_result, detect_result, losses.avg, (*final_metric, *(total_loss.cpu() / len(dataloader)).tolist()),in_metrics.get_maps(in_nc), t
+    return ll_segment_result, detect_result, losses.avg, (*final_metric, *(total_loss.cpu() / len(val_loader)).tolist()),in_metrics.get_maps(in_nc), t
         
 
 
