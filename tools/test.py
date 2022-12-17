@@ -36,7 +36,7 @@ def parse_args():
                         help='log directory',
                         type=str,
                         default='runs/')
-    parser.add_argument('--weights', nargs='+', type=str, default='runs/BddDataset/checkpoint.pth', help='model.pth path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='runs/BddDataset/model_best.pth', help='model.pth path(s)')
     parser.add_argument('--conf_thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou_thres', type=float, default=0.6, help='IOU threshold for NMS')
     args = parser.parse_args()
