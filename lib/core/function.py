@@ -371,10 +371,13 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
         # output([xyxy,conf,cls])
         # target[0] ([img_id,cls,xyxy])
         plot_masks = []  # masks for plotting
+        print("**New in_preds",len(in_preds))
+        print("**New protos",protos.shape)
         for si, (in_pred,proto) in enumerate(zip(in_preds, protos)):
+            print("This is SI:",si)
             pred = output[si]
-            labels = target[0][target[0][:, 0] == si, 1:]     #all object in one image 
-            in_labels = target[2][target[2][:, 0] == si, 1:]     #all object in one image 
+            labels = target[0][target[0][:, 0] == si, 1:]   #all object in one image 
+            in_labels = target[2][target[2][:, 0] == si, 1:]  #all object in one image 
             nl = len(labels)    # num of object
             in_nl, in_npr = in_labels.shape[0], in_pred.shape[0]  # number of labels, predictions
             tcls = labels[:, 0].tolist() if nl else []  # target class
@@ -383,16 +386,20 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             path, shape = Path(paths[si]), shapes[si][0]
             seen += 1
 
+            print("nl:",nl)
             if len(pred) == 0:
                 if nl:
                     stats.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
+                print("In nl")
                 continue
-
+            
+            print("in_nl:",in_nl)
             if in_npr == 0:
                 if in_nl:
                     in_stats.append((correct_masks, correct_bboxes, *torch.zeros((2, 0)).to(device) , in_labels[:, 0]))
                     if config.TEST.PLOTS:
                         in_confusion_matrix.process_batch(detections=None, labels=in_labels[:, 0])
+                print("In in_nl")
                 continue
 
             # Masks
@@ -459,52 +466,54 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             
             pred_masks = torch.as_tensor(pred_masks, dtype=torch.uint8)
             # print("PRED_MASK 2",pred_masks.shape)
-            if config.TEST.PLOTS  and batch_i < 3:
+
+            if config.TEST.PLOTS and batch_i < 3:
+                print("YEEEEEET")
                 plot_masks.append(pred_masks[:15].cpu())  # filter top 15 to plot
-                # print("plot_masks list:",len(plot_masks))
+                print("plot_masks list:",len(plot_masks))
 
-            # # Append to text file
-            if config.TEST.SAVE_TXT:
-                gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
-                for *xyxy, conf, cls in predn.tolist():
-                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                    with open(save_dir / 'labels' / (path.stem + '.txt'), 'a') as f:
-                        f.write(('%g ' * len(line)).rstrip() % line + '\n')
-                save_one_txt(in_predn, save_conf, shape, file=save_dir / 'in_labels' / f'{path.stem}.txt')
+            # Append to text file
+            # if config.TEST.SAVE_TXT:
+            #     gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
+            #     for *xyxy, conf, cls in predn.tolist():
+            #         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+            #         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
+            #         with open(save_dir / 'labels' / (path.stem + '.txt'), 'a') as f:
+            #             f.write(('%g ' * len(line)).rstrip() % line + '\n')
+            #     save_one_txt(in_predn, save_conf, shape, file=save_dir / 'in_labels' / f'{path.stem}.txt')
 
-            # W&B logging
-            if config.TEST.PLOTS and len(wandb_images) < log_imgs:
-                box_data = [{"position": {"minX": xyxy[0], "minY": xyxy[1], "maxX": xyxy[2], "maxY": xyxy[3]},
-                             "class_id": int(cls),
-                             "box_caption": "%s %.3f" % (names[cls], conf),
-                             "scores": {"class_score": conf},
-                             "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
-                boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
-                wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
+            # # W&B logging
+            # if config.TEST.PLOTS and len(wandb_images) < log_imgs:
+            #     box_data = [{"position": {"minX": xyxy[0], "minY": xyxy[1], "maxX": xyxy[2], "maxY": xyxy[3]},
+            #                  "class_id": int(cls),
+            #                  "box_caption": "%s %.3f" % (names[cls], conf),
+            #                  "scores": {"class_score": conf},
+            #                  "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
+            #     boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
+            #     wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
 
-            # # Append to pycocotools JSON dictionary
-            if config.TEST.SAVE_JSON:
-                # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
-                image_id = int(path.stem) if path.stem.isnumeric() else path.stem
-                box = xyxy2xywh(predn[:, :4])  # xywh
-                box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-                for p, b in zip(pred.tolist(), box.tolist()):
-                    jdict.append({'image_id': image_id,
-                                  'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
-                                  'bbox': [round(x, 3) for x in b],
-                                  'score': round(p[4], 5)})
+            # # # Append to pycocotools JSON dictionary
+            # if config.TEST.SAVE_JSON:
+            #     # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
+            #     image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+            #     box = xyxy2xywh(predn[:, :4])  # xywh
+            #     box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+            #     for p, b in zip(pred.tolist(), box.tolist()):
+            #         jdict.append({'image_id': image_id,
+            #                       'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
+            #                       'bbox': [round(x, 3) for x in b],
+            #                       'score': round(p[4], 5)})
 
         if config.TEST.PLOTS and batch_i < 3:
             if len(plot_masks):
                 plot_masks = torch.cat(plot_masks, dim=0)
-            # print("LABELS OUTPUT")
-            # print("Target:",target[2].shape)
-            # print("Masks:",masks.shape)
+            print("\nLABELS OUTPUT")
+            print("Target:",target[2].shape)
+            print("Masks:",masks.shape)
             in_plot_images_and_masks(plt_img, target[2], masks, paths, save_dir + f'/val_batch{batch_i}_labels.jpg', in_names)
-            # print("PREDS OUTPUT")
-            # print("Target:",in_output_to_target(in_preds, max_det=15).shape)
-            # print("Masks:",plot_masks.shape)
+            print("\nPREDS OUTPUT")
+            print("Target:",in_output_to_target(in_preds, max_det=15).shape)
+            print("Masks:",plot_masks.shape)
             in_plot_images_and_masks(plt_img, in_output_to_target(in_preds, max_det=15), plot_masks, paths,
                                   save_dir + f'/val_batch{batch_i}_pred.jpg', in_names)  # pred
             

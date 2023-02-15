@@ -124,13 +124,13 @@ class AutoDriveDataset(Dataset):
         # ratio = (w / w0, h / h0)
         # print(resized_shape)
         
-        det_label = data["label"]
+        det_label = data["label"].copy()   
         labels=[]
         masks = []
         
         if det_label.size > 0:
             # Normalized xywh to pixel xyxy format
-            labels = det_label.copy()
+            labels = det_label
             labels[:, 1] = ratio[0] * w * (det_label[:, 1] - det_label[:, 3] / 2) + pad[0]  # pad width
             labels[:, 2] = ratio[1] * h * (det_label[:, 2] - det_label[:, 4] / 2) + pad[1]  # pad height
             labels[:, 3] = ratio[0] * w * (det_label[:, 1] + det_label[:, 3] / 2) + pad[0]
@@ -192,7 +192,7 @@ class AutoDriveDataset(Dataset):
                                                                         self.downsample_ratio))
             # if self.is_train:
             # random left-right flip
-            lr_flip = True
+            lr_flip = False
             if lr_flip:# and random.random() < 0.5:
                 img = np.fliplr(img)
                 lane_label = np.fliplr(lane_label)
