@@ -55,7 +55,7 @@ YOLOP = [
 [ -1, Conv, [256, 256, 3, 2]],      #21
 [ [-1, 10], Concat, [1]],   #22
 [ -1, BottleneckCSP, [512, 512, 1, False]],     #23
-[ [17, 20, 23], Detect,  [1, detect_anchors, [128, 256, 512]]], #Detection head 24
+[ [17, 20, 23], Detect,  [nc, detect_anchors, [128, 256, 512]]], #Detection head 24
 
 [ 16, Conv, [256, 128, 3, 1]],   #25
 [ -1, Upsample, [None, 2, 'nearest']],  #26
