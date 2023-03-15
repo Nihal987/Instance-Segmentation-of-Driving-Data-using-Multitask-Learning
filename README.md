@@ -51,11 +51,3 @@
 | `Ins Seg + Lane Sem Seg + Veh Dect`  | 78.4      | 75.9  | 81.9    | 53.4     | 7.0             |
 | `Ins Seg + Lane Sem Seg + Lane Dect` | -         | -     | -       | -        | -               |
 
-#### Lane Detection Result:
-
-| Model         | mIOU(%) | IOU(%) |
-| ------------- | ------- | ------ |
-| `ENet`        | 34.12   | 14.64  |
-| `SCNN`        | 35.79   | 15.84  |
-| `ENet-SAD`    | 36.56   | 16.02  |
-| `YOLOP(ours)` | 70.50   | 26.20  |
