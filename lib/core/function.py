@@ -207,7 +207,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
     is_coco = False #is coco dataset
     save_conf=False # save auto-label confidences
     verbose=False
-    save_hybrid=False
+    save_hybrid=True
     log_imgs,wandb = min(16,100), None
 
     nc = model.nc # number of classes for detection
@@ -317,6 +317,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             in_lb = [target[2][target[2][:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
             output = non_max_suppression(inf_out, conf_thres= config.TEST.NMS_CONF_THRESHOLD, iou_thres=config.TEST.NMS_IOU_THRESHOLD, labels=lb)
             in_preds = in_non_max_suppression(in_preds, conf_thres= config.TEST.NMS_CONF_THRESHOLD, iou_thres=config.TEST.NMS_IOU_THRESHOLD, labels=in_lb,max_det=300,nm=nm)
+
             #output = non_max_suppression(inf_out, conf_thres=0.001, iou_thres=0.6)
             #output = non_max_suppression(inf_out, conf_thres=config.TEST.NMS_CONF_THRES, iou_thres=config.TEST.NMS_IOU_THRES)
             t_nms = time_synchronized() - t
@@ -371,10 +372,8 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
         # output([xyxy,conf,cls])
         # target[0] ([img_id,cls,xyxy])
         plot_masks = []  # masks for plotting
-        print("**New in_preds",len(in_preds))
-        print("**New protos",protos.shape)
         for si, (in_pred,proto) in enumerate(zip(in_preds, protos)):
-            print("This is SI:",si)
+            # print("This is SI:",si)
             pred = output[si]
             labels = target[0][target[0][:, 0] == si, 1:]   #all object in one image 
             in_labels = target[2][target[2][:, 0] == si, 1:]  #all object in one image 
@@ -386,20 +385,18 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             path, shape = Path(paths[si]), shapes[si][0]
             seen += 1
 
-            print("nl:",nl)
             if len(pred) == 0:
                 if nl:
                     stats.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
-                print("In nl")
+                # print("NL",pred)
                 continue
             
-            print("in_nl:",in_nl)
             if in_npr == 0:
                 if in_nl:
                     in_stats.append((correct_masks, correct_bboxes, *torch.zeros((2, 0)).to(device) , in_labels[:, 0]))
                     if config.TEST.PLOTS:
                         in_confusion_matrix.process_batch(detections=None, labels=in_labels[:, 0])
-                print("In in_nl")
+                # print("IN_NL",in_pred.shape)
                 continue
 
             # Masks
@@ -468,11 +465,10 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             # print("PRED_MASK 2",pred_masks.shape)
 
             if config.TEST.PLOTS and batch_i < 3:
-                print("YEEEEEET")
                 plot_masks.append(pred_masks[:15].cpu())  # filter top 15 to plot
-                print("plot_masks list:",len(plot_masks))
+                # print("plot_masks list:",len(plot_masks))
 
-            # Append to text file
+            # # Append to text file
             # if config.TEST.SAVE_TXT:
             #     gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
             #     for *xyxy, conf, cls in predn.tolist():
@@ -507,15 +503,16 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
         if config.TEST.PLOTS and batch_i < 3:
             if len(plot_masks):
                 plot_masks = torch.cat(plot_masks, dim=0)
-            print("\nLABELS OUTPUT")
-            print("Target:",target[2].shape)
-            print("Masks:",masks.shape)
+
+            # print("\nLABELS OUTPUT")
+            # print("Target:",target[2].shape)
+            # print("Masks:",masks.shape)
             in_plot_images_and_masks(plt_img, target[2], masks, paths, save_dir + f'/val_batch{batch_i}_labels.jpg', in_names)
-            print("\nPREDS OUTPUT")
-            print("Target:",in_output_to_target(in_preds, max_det=15).shape)
-            print("Masks:",plot_masks.shape)
+            # print("\nPREDS OUTPUT")
+            # print("Target:",in_output_to_target(in_preds, max_det=15).shape)
+            # print("Masks:",plot_masks.shape)
             in_plot_images_and_masks(plt_img, in_output_to_target(in_preds, max_det=15), plot_masks, paths,
-                                  save_dir + f'/val_batch{batch_i}_pred.jpg', in_names)  # pred
+                                save_dir + f'/val_batch{batch_i}_pred.jpg', in_names)  # pred
             
 
     # Compute statistics
@@ -542,6 +539,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
     pf = '%20s' + '%12.3g' * 6  # print format
     print(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
     in_pf = '%22s' + '%11i' * 2 + '%11.3g' * 8  # print format
+    print("\nINSTANCE SEGMENTATION")
     print(in_pf % ("all", seen, in_nt.sum(), *in_metrics.mean_results()))
     if in_nt.sum() == 0:
         print(f'WARNING: no labels found in val set, can not compute metrics without labels ⚠️')
@@ -553,6 +551,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
     if (verbose or (nc <= 20 and not training)) and nc > 1 and len(stats):
         for i, c in enumerate(ap_class):
             print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap[i]))
+        print("\nINSTANCE SEGMENTATION")
         for i, c in enumerate(in_metrics.ap_class_index):
             print(in_pf % (in_names[c], seen, in_nt[c], *in_metrics.class_result(i)))
 

@@ -53,10 +53,10 @@ _C.LOSS.LL_IOU_GAIN = 0.2 # lane line iou loss gain
 
 # DATASET related params
 _C.DATASET = CN(new_allowed=True)
-_C.DATASET.DATAROOT = 'bdd_small/images'       # the path of images folder
-_C.DATASET.LABELROOT = 'bdd_small/ll_det_annotations'      # the path of det_annotations folder
-_C.DATASET.LANEROOT = 'bdd_small/ll_seg_annotations'             # the path of ll_seg_annotations folder
-_C.DATASET.INS_MASKROOT = 'bdd_small/in_seg_annotations'        # the path of in_seg_annotations folder
+_C.DATASET.DATAROOT = 'bdd/images'       # the path of images folder
+_C.DATASET.LABELROOT = 'bdd/ll_det_annotations'      # the path of det_annotations folder
+_C.DATASET.LANEROOT = 'bdd/ll_seg_annotations'             # the path of ll_seg_annotations folder
+_C.DATASET.INS_MASKROOT = 'bdd/in_seg_annotations'        # the path of in_seg_annotations folder
 _C.DATASET.DATASET = 'BddDataset'
 _C.DATASET.TRAIN_SET = 'train'
 _C.DATASET.TEST_SET = 'val'
