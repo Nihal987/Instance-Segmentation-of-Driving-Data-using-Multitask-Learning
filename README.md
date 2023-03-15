@@ -22,6 +22,31 @@
 - Detection and Semantic Segmentation of the Lane Line are performed in parallel to capture information about the lane attributes (as in if it is a dashed white line, solid yellow line etc)
 - The model is able to simultaneoulsy train on 3 tasks  in autonomous driving: lane detection detection, drivable area instance segmentation and lane semantic segmentation to save computational costs, reduce inference time as well as improve the performance of each task. 
 
+## Dataset Structure
+```
+bdd100k
+├── det_annotations
+│   ├── test
+│   ├── train
+│   └── val
+├── images
+│   ├── test
+│   ├── train
+│   └── val
+├── in_seg_annotations
+│   ├── test
+│   ├── train
+│   └── val
+├── ll_det_annotations
+│   ├── test
+│   ├── train
+│   └── val
+└── ll_seg_annotations
+    ├── test
+    ├── train
+    └── val
+```
+
 ## Experiements
 - Various experiments are conducted to determine what combination of features produces the best results for Instance Segmentation of Drivable area
 - By modifying a single parameter in the configuration file of this model, we can selectively freeze specific branches of the network. This allows us to experiment with different branch combinations and conduct various tests.
