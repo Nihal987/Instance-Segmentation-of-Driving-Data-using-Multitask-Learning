@@ -63,7 +63,7 @@ bdd100k
 | Training_method                      | Recall(%) |  P(%) | mAP(50%)| mAP(95%) | Speed(ms/frame) |
 | ---------------                      | --------- | ----- | ------- | ---------| --------------- |
 | `Ins Seg(only)`                      | 64.4      | 62.4  | 64.8    | 28.4     | 6.0             |
-| `Ins Seg + Lane Sem Seg`             | -         | -     | -       | -        | -               |
+| **`Ins Seg + Lane Sem Seg`**         | **81.1**  |**77.6**|**83.6** |**59.8**| **5.6**     |
 | `Ins Seg + Lane Sem Seg + Veh Dect`  | 80.7      | 77.0  | 84.6    | 58.4     | 7.0             |
 | `Ins Seg + Lane Sem Seg + Lane Dect` | -         | -     | -       | -        | -               |
 
@@ -72,7 +72,7 @@ bdd100k
 | Training_method                      | Recall(%) |  P(%) | mAP(50%)| mAP(95%) | Speed(ms/frame) |
 | ---------------                      | --------- | ----- | ------- | ---------| --------------- |
 | `Ins Seg(only)`                      | 59.1      | 58.8  | 58.0    | 23.2     | 6.0             |
-| `Ins Seg + Lane Sem Seg`             | -         | -     | -       | -        | -               |
+| **`Ins Seg + Lane Sem Seg`**         |**79.2**   |**76.3**|**81.2**|**54.4**  |**5.6**          |
 | `Ins Seg + Lane Sem Seg + Veh Dect`  | 78.4      | 75.9  | 81.9    | 53.4     | 7.0             |
 | `Ins Seg + Lane Sem Seg + Lane Dect` | -         | -     | -       | -        | -               |
 
