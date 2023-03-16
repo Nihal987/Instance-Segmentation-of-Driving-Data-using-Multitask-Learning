@@ -24,7 +24,7 @@
 
 ## Dataset Structure
 ```
-bdd100k
+bdd
 ├── det_annotations
 │   ├── test
 │   ├── train
