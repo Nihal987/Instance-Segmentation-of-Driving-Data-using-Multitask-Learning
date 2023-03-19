@@ -23,8 +23,8 @@ from lib.config import update_config
 from lib.utils.utils import create_logger, select_device, time_synchronized
 from lib.models import get_net
 from lib.dataset import LoadImages, LoadStreams
-from lib.core.general import non_max_suppression, scale_coords
-from lib.utils import plot_one_box,show_seg_result
+from lib.core.general import non_max_suppression,in_non_max_suppression, scale_coords
+from lib.utils import plot_one_box,show_seg_result, is_parallel
 from lib.core.function import AverageMeter
 from lib.core.postprocess import morphological_process, connect_lane
 from tqdm import tqdm
@@ -51,9 +51,12 @@ def detect(cfg,opt):
 
     # Load model
     model = get_net(cfg)
-    checkpoint = torch.load(opt.weights, map_location= device)
-    model.load_state_dict(checkpoint['state_dict'])
+    model_dict = model.state_dict()
+    checkpoint = torch.load(opt.weights,map_location= device)
+    model_dict.update(checkpoint["best_state_dict"])
+    model.load_state_dict(model_dict)
     model = model.to(device)
+    
     if half:
         model.half()  # to FP16
 
@@ -90,16 +93,22 @@ def detect(cfg,opt):
             img = img.unsqueeze(0)
         # Inference
         t1 = time_synchronized()
-        det_out, da_seg_out,ll_seg_out= model(img)
+        det_out, ll_seg_out, in_det_out = model(img)
         t2 = time_synchronized()
         # if i == 0:
         #     print(det_out)
         inf_out, _ = det_out
+        in_pred, proto = in_det_out[:2]
         inf_time.update(t2-t1,img.size(0))
+        ISegment = model.module.model[model.module.in_seg_out_idx] if is_parallel(model) \
+        else model.model[model.in_seg_out_idx]  # ISegment() module
+        nm = ISegment.nm # number of masks
+        classes = model.names_in
 
         # Apply NMS
         t3 = time_synchronized()
         det_pred = non_max_suppression(inf_out, conf_thres=opt.conf_thres, iou_thres=opt.iou_thres, classes=None, agnostic=False)
+        in_pred = in_non_max_suppression(in_pred, opt.conf_thres, opt.iou_thres, classes, False, max_det=300, nm=nm)
         t4 = time_synchronized()
 
         nms_time.update(t4-t3,img.size(0))
@@ -113,14 +122,7 @@ def detect(cfg,opt):
         pad_w = int(pad_w)
         pad_h = int(pad_h)
         ratio = shapes[1][0][1]
-
-        da_predict = da_seg_out[:, :, pad_h:(height-pad_h),pad_w:(width-pad_w)]
-        da_seg_mask = torch.nn.functional.interpolate(da_predict, scale_factor=int(1/ratio), mode='bilinear')
-        _, da_seg_mask = torch.max(da_seg_mask, 1)
-        da_seg_mask = da_seg_mask.int().squeeze().cpu().numpy()
-        # da_seg_mask = morphological_process(da_seg_mask, kernel_size=7)
-
-        
+       
         ll_predict = ll_seg_out[:, :,pad_h:(height-pad_h),pad_w:(width-pad_w)]
         ll_seg_mask = torch.nn.functional.interpolate(ll_predict, scale_factor=int(1/ratio), mode='bilinear')
         _, ll_seg_mask = torch.max(ll_seg_mask, 1)
@@ -129,6 +131,7 @@ def detect(cfg,opt):
         #ll_seg_mask = morphological_process(ll_seg_mask, kernel_size=7, func_type=cv2.MORPH_OPEN)
         #ll_seg_mask = connect_lane(ll_seg_mask)
 
+        ll_seg = ll_seg_mask.shape
         img_det = show_seg_result(img_det, (da_seg_mask, ll_seg_mask), _, _, is_demo=True)
 
         if len(det):
@@ -165,8 +168,8 @@ def detect(cfg,opt):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='weights/End-to-end.pth', help='model.pth path(s)')
-    parser.add_argument('--source', type=str, default='inference/videos', help='source')  # file/folder   ex:inference/images
+    parser.add_argument('--weights', nargs='+', type=str, default='runs/BddDataset/model_best.pth', help='model.pth path(s)')
+    parser.add_argument('--source', type=str, default='inference/images/0ace96c3-48481887.jpg', help='source')  # file/folder   ex:inference/images
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')

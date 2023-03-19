@@ -108,7 +108,7 @@ _C.TRAIN.ANCHOR_THRESHOLD = 4.0
 # Alternating optimization
 _C.TRAIN.SEG_ONLY = False           # Only train two segmentation branchs
 _C.TRAIN.DET_ONLY = False           # Only train detection branch
-_C.TRAIN.ENC_SEG_ONLY = False       # Only train encoder and two segmentation branchs
+_C.TRAIN.ENC_SEG_ONLY = True       # Only train encoder and two segmentation branchs
 _C.TRAIN.ENC_DET_ONLY = False       # Only train encoder and detection branch
 _C.TRAIN.ENC_INS_SEG_ONLY = False      # Only train encoder + da ins segmentation task
 

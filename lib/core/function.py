@@ -340,6 +340,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
                         ll_gt_mask = ll_gt_mask.int().squeeze().cpu().numpy()
                         # seg_mask = seg_mask > 0.5
                         # plot_img_and_mask(img_test, seg_mask, i,epoch,save_dir)
+                        ll_seg = ll_seg_mask.shape
                         img_ll1 = img_ll.copy()
                         _ = show_seg_result(img_ll, ll_seg_mask, i,epoch,save_dir, is_ll=True)
                         _ = show_seg_result(img_ll1, ll_gt_mask, i, epoch, save_dir, is_ll=True, is_gt=True)
