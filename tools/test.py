@@ -36,7 +36,7 @@ def parse_args():
                         help='log directory',
                         type=str,
                         default='runs/')
-    parser.add_argument('--weights', nargs='+', type=str, default='runs/BddDataset/checkpoint.pth', help='model.pth path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='runs/BddDataset/model_best.pth', help='model.pth path(s)')
     parser.add_argument('--conf_thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou_thres', type=float, default=0.6, help='IOU threshold for NMS')
     args = parser.parse_args()
@@ -80,8 +80,8 @@ def main():
     model_dict = model.state_dict()
     checkpoint_file = args.weights
     logger.info("=> loading checkpoint '{}'".format(checkpoint_file))
-    checkpoint = torch.load(checkpoint_file)
-    checkpoint_dict = checkpoint['state_dict']
+    checkpoint = torch.load(checkpoint_file,map_location= device)
+    checkpoint_dict = checkpoint['best_state_dict']
     # checkpoint_dict = {k: v for k, v in checkpoint['state_dict'].items() if k.split(".")[1] in det_idx_range}
     model_dict.update(checkpoint_dict)
     model.load_state_dict(model_dict)

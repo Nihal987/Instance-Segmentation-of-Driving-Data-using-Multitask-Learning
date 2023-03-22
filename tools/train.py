@@ -175,17 +175,17 @@ def main():
             model.load_state_dict(model_dict)
             logger.info("=> loaded det branch checkpoint '{}' ".format(checkpoint_file))
         
-        if cfg.AUTO_RESUME and os.path.exists(checkpoint_file):
-            logger.info("=> loading checkpoint '{}'".format(checkpoint_file))
-            checkpoint = torch.load(checkpoint_file)
-            begin_epoch = checkpoint['epoch']
-            # best_perf = checkpoint['perf']
-            last_epoch = checkpoint['epoch']
-            model.load_state_dict(checkpoint['state_dict'])
-            # optimizer = get_optimizer(cfg, model)
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            logger.info("=> loaded checkpoint '{}' (epoch {})".format(
-                checkpoint_file, checkpoint['epoch']))
+        # if cfg.AUTO_RESUME and os.path.exists(checkpoint_file):
+        #     logger.info("=> loading checkpoint '{}'".format(checkpoint_file))
+        #     checkpoint = torch.load(checkpoint_file,map_location= device)
+        #     begin_epoch = checkpoint['epoch']
+        #     # best_perf = checkpoint['perf']
+        #     last_epoch = checkpoint['epoch']
+        #     model.load_state_dict(checkpoint['state_dict'])
+        #     # optimizer = get_optimizer(cfg, model)
+        #     optimizer.load_state_dict(checkpoint['optimizer'])
+        #     logger.info("=> loaded checkpoint '{}' (epoch {})".format(
+        #         checkpoint_file, checkpoint['epoch']))
             #cfg.NEED_AUTOANCHOR = False     #disable autoanchor
         # model = model.to(device)
 

@@ -128,13 +128,13 @@ def save_checkpoint(epoch, name, model, optimizer, output_dir, filename, is_best
             'epoch': epoch,
             'model': name,
             'state_dict': model_state,
-            'best_state_dict': model.module.state_dict() if is_parallel(model) else model.state_dict(),
+            # 'best_state_dict': model.module.state_dict() if is_parallel(model) else model.state_dict(),
             # 'perf': perf_indicator,
             'optimizer': optimizer.state_dict(),
         }
     torch.save(checkpoint, os.path.join(output_dir, filename))
     if is_best and 'state_dict' in checkpoint:
-        torch.save(checkpoint['best_state_dict'],
+        torch.save(checkpoint,
                    os.path.join(output_dir, 'model_best.pth'))
 
 
