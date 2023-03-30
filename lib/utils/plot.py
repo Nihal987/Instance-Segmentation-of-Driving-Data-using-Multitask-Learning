@@ -7,13 +7,27 @@ import torch
 import numpy as np
 import math
 import random
+import torchvision.transforms as transforms
 from PIL import Image, ImageDraw, ImageFont
 from ..core.general import is_ascii,is_writeable,in_xywh2xyxy,scale_image
 from pathlib import Path
 import threading
 FONT = 'Arial.ttf'
 
+invTrans = transforms.Compose([ transforms.Normalize(mean = [ 0., 0., 0. ],
+                                                     std = [ 1/0.229, 1/0.224, 1/0.225 ]),
+                                transforms.Normalize(mean = [ -0.485, -0.456, -0.406 ],
+                                                     std = [ 1., 1., 1. ]),
+                               ])
 
+normalize = transforms.Normalize(
+        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+    )
+
+transform=transforms.Compose([
+            transforms.ToTensor(),
+            normalize,
+        ])
 
 def threaded(func):
     # Multi-threads a target function and returns thread. Usage: @threaded decorator
@@ -171,6 +185,8 @@ class Annotator:
             masks = (masks @ colors).clip(0, 255)  # (h,w,n) @ (n,3) = (h,w,3)
             self.im[:] = masks * alpha + self.im * (1 - s * alpha)
         else:
+            im_gpu = invTrans(im_gpu) #perform inverse transform because the ori
+            # im_gpu/=255
             if len(masks) == 0:
                 self.im[:] = im_gpu.permute(1, 2, 0).contiguous().cpu().numpy() * 255
             colors = torch.tensor(colors, device=im_gpu.device, dtype=torch.float32) / 255.0

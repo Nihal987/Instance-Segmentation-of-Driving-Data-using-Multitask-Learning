@@ -177,7 +177,7 @@ def main():
         
         if cfg.AUTO_RESUME and os.path.exists(checkpoint_file):
             logger.info("=> loading checkpoint '{}'".format(checkpoint_file))
-            checkpoint = torch.load(checkpoint_file)
+            checkpoint = torch.load(checkpoint_file,map_location= device)
             begin_epoch = checkpoint['epoch']
             # best_perf = checkpoint['perf']
             last_epoch = checkpoint['epoch']
@@ -250,6 +250,15 @@ def main():
             for k, v in model.named_parameters():
                 v.requires_grad = True  # train all layers
                 if k.split(".")[1] in Ll_Seg_Head_para_idx + Det_Head_para_idx:
+                    print('freezing %s' % k)
+                    v.requires_grad = False
+
+        if cfg.TRAIN.ENC_DET_INS_SEG_ONLY:
+            logger.info('freeze Ll_Seg head...')
+            # print(model.named_parameters)
+            for k, v in model.named_parameters():
+                v.requires_grad = True  # train all layers
+                if k.split(".")[1] in Ll_Seg_Head_para_idx:
                     print('freezing %s' % k)
                     v.requires_grad = False
         

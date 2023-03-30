@@ -216,6 +216,10 @@ class MultiHeadLoss(nn.Module):
             lseg_ll = 0 * lseg_ll
             liou_ll = 0 * liou_ll
 
+        if cfg.TRAIN.ENC_DET_INS_SEG_ONLY: # Train only encoder + ins seg of da + det
+            lseg_ll = 0 * lseg_ll
+            liou_ll = 0 * liou_ll
+
         loss = lbox + lobj + lcls + lseg_ll + liou_ll + in_lcls + in_lobj + in_lbox + in_lseg 
         # loss = lseg
         # return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()

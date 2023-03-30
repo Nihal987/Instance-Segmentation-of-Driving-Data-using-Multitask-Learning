@@ -79,18 +79,6 @@ def train(cfg, train_loader, model, criterion, optimizer, scaler, epoch, num_bat
         with amp.autocast(enabled=device.type != 'cpu'):
             outputs = model(input)
             torch.set_printoptions(threshold=sys.maxsize)
-            # print("pred:",type(outputs[2]))
-            # p,proto = outputs[2]
-            # print("proto shape:",proto.shape)
-            # print("masks:",masks)
-            # print("target",target[2])
-            # print("\nTRAINING")
-            # print("mask max:",masks.max())
-            # if masks.max() <= 1.0:
-            #     print("\n$$$$$$$$$$$$$$$$$$$$$$")
-            # else:
-            #     print("\n*************None")
-            # print("targets:",target[2])
 
             total_loss, head_losses = criterion(outputs, target, shapes, model, masks)
             # print(head_losses)
@@ -207,7 +195,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
     is_coco = False #is coco dataset
     save_conf=False # save auto-label confidences
     verbose=False
-    save_hybrid=True
+    save_hybrid=False
     log_imgs,wandb = min(16,100), None
 
     nc = model.nc # number of classes for detection
@@ -264,11 +252,6 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             masks = masks.float()
             nb, _, height, width = img.shape    #batch size, channel, height, width
 
-        # print("\nmasks:",masks)
-        # if masks.max() <= 1.0:
-        #     print("\n$$$$$$$$$$$$$$$$$$$$$$")
-        # else:
-        #     print("\n*************None")
         with torch.no_grad():
             pad_w, pad_h = shapes[0][1][1]
             pad_w = int(pad_w)
@@ -284,12 +267,6 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             inf_out,train_out = det_out
             in_preds, protos, in_train_out = in_det_out
 
-            # for p in in_preds:
-            #     print("preds:",p.shape)
-            # print("protos:",protos.shape)
-            # print("img:",img.shape)
-            # for t in in_train_out:
-            #     print("train_out:",t.shape)
             #lane line segment evaluation
             _,ll_predict=torch.max(ll_seg_out, 1)
             _,ll_gt=torch.max(target[1], 1)
