@@ -22,36 +22,6 @@
 - Detection and Semantic Segmentation of the Lane Line are performed in parallel to capture information about the lane attributes (as in if it is a dashed white line, solid yellow line etc)
 - The model is able to simultaneoulsy train on 3 tasks  in autonomous driving: lane detection detection, drivable area instance segmentation and lane semantic segmentation to save computational costs, reduce inference time as well as improve the performance of each task. 
 
-## Dataset Structure
-```
-bdd
-├── det_annotations
-│   ├── test
-│   ├── train
-│   └── val
-├── images
-│   ├── test
-│   ├── train
-│   └── val
-├── in_seg_annotations
-│   ├── test
-│   ├── train
-│   └── val
-├── ll_det_annotations
-│   ├── test
-│   ├── train
-│   └── val
-└── ll_seg_annotations
-    ├── test
-    ├── train
-    └── val
-```
-## Running the Project
-
-### Requirements
-The codebase has been developed on Python 3.8.1, PyTorch 1.7+ and torchvision 0.8+:
-
-
 ## Experiements
 - Various experiments are conducted to determine what combination of features produces the best results for Instance Segmentation of Drivable area
 - By modifying a single parameter in the configuration file of this model, we can selectively freeze specific branches of the network. This allows us to experiment with different branch combinations and conduct various tests.
@@ -80,4 +50,88 @@ The codebase has been developed on Python 3.8.1, PyTorch 1.7+ and torchvision 0.
 | **`Ins Seg DA + Lane Sem Seg`**         |**79.2**   |**76.3**|**81.2**|**54.4**  |**5.6**          |
 | `Ins Seg DA + Lane Sem Seg + Veh Dect`  | 78.4      | 75.9  | 81.9    | 53.4     | 7.0             |
 | `Ins Seg DA + Lane Sem Seg + Lane Dect` | -         | -     | -       | -        | -               |
+
+
+## Dataset Structure
+Download the dataset from this [link]()
+```
+bdd
+├── det_annotations
+│   ├── test
+│   ├── train
+│   └── val
+├── images
+│   ├── test
+│   ├── train
+│   └── val
+├── in_seg_annotations
+│   ├── test
+│   ├── train
+│   └── val
+├── ll_det_annotations
+│   ├── test
+│   ├── train
+│   └── val
+└── ll_seg_annotations
+    ├── test
+    ├── train
+    └── val
+```
+## Running the Project
+
+### Requirements
+The codebase has been developed on Python 3.8.1, PyTorch 1.7+ and torchvision 0.8+:
+
+To install the requirements run the below line
+```setup
+pip install -r requirements.txt
+```
+
+### Training
+
+You can set the training configuration in the `./lib/config/default.py`. (Including:  the loading of preliminary model,  loss,  data augmentation, optimizer, warm-up and cosine annealing, auto-anchor, training epochs, batch_size).
+
+If you want try alternating optimization or train model for single task, please modify the corresponding configuration in `./lib/config/default.py` to `True`. (As following, all configurations is `False`, which means training multiple tasks end to end).
+
+```python
+# Alternating optimization
+_C.TRAIN.SEG_ONLY = False           # Only train two segmentation branchs
+_C.TRAIN.DET_ONLY = False           # Only train detection branch
+_C.TRAIN.ENC_SEG_ONLY = False       # Only train encoder and two segmentation branchs
+_C.TRAIN.ENC_DET_ONLY = False       # Only train encoder and detection branch
+
+# Single task 
+_C.TRAIN.DRIVABLE_ONLY = False      # Only train da_segmentation task
+_C.TRAIN.LANE_ONLY = False          # Only train ll_segmentation task
+_C.TRAIN.DET_ONLY = False          # Only train detection task
+```
+
+Start training:
+
+```shell
+python tools/train.py
+```
+
+
+
+### Evaluation
+
+You can set the evaluation configuration in the `./lib/config/default.py`. (Including： batch_size and threshold value for nms).
+
+Start evaluating:
+
+```shell
+python tools/test.py --weights weights/End-to-end.pth
+```
+
+
+
+### Demo Test
+
+You can store the image or video in `--source`, and then save the reasoning result to `--save-dir`
+
+```shell
+python tools/demo.py --source inference/images
+```
+The demo can be applied to a video as well
 
