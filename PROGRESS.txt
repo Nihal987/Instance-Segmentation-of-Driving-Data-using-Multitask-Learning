@@ -1,6 +1,0 @@
-This code was built for:
-1. vehcile detection
-2. Instance Segmentation of Drivable Area
-3. Lane Line Semantic Segmentation
-
-Need to test how it performs after training

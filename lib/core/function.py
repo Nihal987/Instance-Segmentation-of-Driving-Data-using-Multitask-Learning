@@ -210,7 +210,8 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
     save_hybrid=True
     log_imgs,wandb = min(16,100), None
 
-    nc = model.nc # number of classes for detection
+    nc = model.nc
+
     iouv = torch.linspace(0.5,0.95,10).to(device)     #iou vector for mAP@0.5:0.95
     niou = iouv.numel()
     ISegment = model.module.model[model.module.in_seg_out_idx] if is_parallel(model) \

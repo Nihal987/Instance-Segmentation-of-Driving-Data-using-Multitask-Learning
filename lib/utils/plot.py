@@ -10,9 +10,24 @@ import random
 from PIL import Image, ImageDraw, ImageFont
 from ..core.general import is_ascii,is_writeable,in_xywh2xyxy,scale_image
 from pathlib import Path
+import torchvision.transforms as transforms
 import threading
 FONT = 'Arial.ttf'
 
+invTrans = transforms.Compose([ transforms.Normalize(mean = [ 0., 0., 0. ],
+                                                     std = [ 1/0.229, 1/0.224, 1/0.225 ]),
+                                transforms.Normalize(mean = [ -0.485, -0.456, -0.406 ],
+                                                     std = [ 1., 1., 1. ]),
+                               ])
+
+normalize = transforms.Normalize(
+        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+    )
+
+transform=transforms.Compose([
+            transforms.ToTensor(),
+            normalize,
+        ])
 
 
 def threaded(func):
@@ -171,6 +186,8 @@ class Annotator:
             masks = (masks @ colors).clip(0, 255)  # (h,w,n) @ (n,3) = (h,w,3)
             self.im[:] = masks * alpha + self.im * (1 - s * alpha)
         else:
+            im_gpu = invTrans(im_gpu) #perform inverse transform because the ori
+            # im_gpu/=255
             if len(masks) == 0:
                 self.im[:] = im_gpu.permute(1, 2, 0).contiguous().cpu().numpy() * 255
             colors = torch.tensor(colors, device=im_gpu.device, dtype=torch.float32) / 255.0
@@ -342,13 +359,13 @@ def show_seg_result(img, result, index, epoch, save_dir=None, is_ll=False,palett
         for label, color in enumerate(palette):
             color_seg[result == label, :] = color
     else:
-        color_area = np.zeros((result[0].shape[0], result[0].shape[1], 3), dtype=np.uint8)
+        color_area = np.zeros((result.shape[0], result.shape[1], 3), dtype=np.uint8)
         
         # for label, color in enumerate(palette):
         #     color_area[result[0] == label, :] = color
 
-        color_area[result[0] == 1] = [0, 255, 0]
-        color_area[result[1] ==1] = [255, 0, 0]
+        color_area[result == 1] = [0, 255, 0]
+        # color_area[result[1] ==1] = [255, 0, 0]
         color_seg = color_area
 
     # convert to BGR
