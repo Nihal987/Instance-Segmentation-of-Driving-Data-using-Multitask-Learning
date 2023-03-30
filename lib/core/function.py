@@ -207,10 +207,11 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
     is_coco = False #is coco dataset
     save_conf=False # save auto-label confidences
     verbose=False
-    save_hybrid=False
+    save_hybrid=True
     log_imgs,wandb = min(16,100), None
 
     nc = model.nc
+
     iouv = torch.linspace(0.5,0.95,10).to(device)     #iou vector for mAP@0.5:0.95
     niou = iouv.numel()
     ISegment = model.module.model[model.module.in_seg_out_idx] if is_parallel(model) \
@@ -317,6 +318,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             in_lb = [target[2][target[2][:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
             output = non_max_suppression(inf_out, conf_thres= config.TEST.NMS_CONF_THRESHOLD, iou_thres=config.TEST.NMS_IOU_THRESHOLD, labels=lb)
             in_preds = in_non_max_suppression(in_preds, conf_thres= config.TEST.NMS_CONF_THRESHOLD, iou_thres=config.TEST.NMS_IOU_THRESHOLD, labels=in_lb,max_det=300,nm=nm)
+
             #output = non_max_suppression(inf_out, conf_thres=0.001, iou_thres=0.6)
             #output = non_max_suppression(inf_out, conf_thres=config.TEST.NMS_CONF_THRES, iou_thres=config.TEST.NMS_IOU_THRES)
             t_nms = time_synchronized() - t
@@ -339,6 +341,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
                         ll_gt_mask = ll_gt_mask.int().squeeze().cpu().numpy()
                         # seg_mask = seg_mask > 0.5
                         # plot_img_and_mask(img_test, seg_mask, i,epoch,save_dir)
+                        ll_seg = ll_seg_mask.shape
                         img_ll1 = img_ll.copy()
                         _ = show_seg_result(img_ll, ll_seg_mask, i,epoch,save_dir, is_ll=True)
                         _ = show_seg_result(img_ll1, ll_gt_mask, i, epoch, save_dir, is_ll=True, is_gt=True)
@@ -372,9 +375,10 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
         # target[0] ([img_id,cls,xyxy])
         plot_masks = []  # masks for plotting
         for si, (in_pred,proto) in enumerate(zip(in_preds, protos)):
+            # print("This is SI:",si)
             pred = output[si]
-            labels = target[0][target[0][:, 0] == si, 1:]     #all object in one image 
-            in_labels = target[2][target[2][:, 0] == si, 1:]     #all object in one image 
+            labels = target[0][target[0][:, 0] == si, 1:]   #all object in one image 
+            in_labels = target[2][target[2][:, 0] == si, 1:]  #all object in one image 
             nl = len(labels)    # num of object
             in_nl, in_npr = in_labels.shape[0], in_pred.shape[0]  # number of labels, predictions
             tcls = labels[:, 0].tolist() if nl else []  # target class
@@ -386,13 +390,15 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             if len(pred) == 0:
                 if nl:
                     stats.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
+                # print("NL",pred)
                 continue
-
+            
             if in_npr == 0:
                 if in_nl:
                     in_stats.append((correct_masks, correct_bboxes, *torch.zeros((2, 0)).to(device) , in_labels[:, 0]))
                     if config.TEST.PLOTS:
                         in_confusion_matrix.process_batch(detections=None, labels=in_labels[:, 0])
+                # print("IN_NL",in_pred.shape)
                 continue
 
             # Masks
@@ -459,54 +465,56 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
             
             pred_masks = torch.as_tensor(pred_masks, dtype=torch.uint8)
             # print("PRED_MASK 2",pred_masks.shape)
-            if config.TEST.PLOTS  and batch_i < 3:
+
+            if config.TEST.PLOTS and batch_i < 3:
                 plot_masks.append(pred_masks[:15].cpu())  # filter top 15 to plot
                 # print("plot_masks list:",len(plot_masks))
 
             # # Append to text file
-            if config.TEST.SAVE_TXT:
-                gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
-                for *xyxy, conf, cls in predn.tolist():
-                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                    with open(save_dir / 'labels' / (path.stem + '.txt'), 'a') as f:
-                        f.write(('%g ' * len(line)).rstrip() % line + '\n')
-                save_one_txt(in_predn, save_conf, shape, file=save_dir / 'in_labels' / f'{path.stem}.txt')
+            # if config.TEST.SAVE_TXT:
+            #     gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
+            #     for *xyxy, conf, cls in predn.tolist():
+            #         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+            #         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
+            #         with open(save_dir / 'labels' / (path.stem + '.txt'), 'a') as f:
+            #             f.write(('%g ' * len(line)).rstrip() % line + '\n')
+            #     save_one_txt(in_predn, save_conf, shape, file=save_dir / 'in_labels' / f'{path.stem}.txt')
 
-            # W&B logging
-            if config.TEST.PLOTS and len(wandb_images) < log_imgs:
-                box_data = [{"position": {"minX": xyxy[0], "minY": xyxy[1], "maxX": xyxy[2], "maxY": xyxy[3]},
-                             "class_id": int(cls),
-                             "box_caption": "%s %.3f" % (names[cls], conf),
-                             "scores": {"class_score": conf},
-                             "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
-                boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
-                wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
+            # # W&B logging
+            # if config.TEST.PLOTS and len(wandb_images) < log_imgs:
+            #     box_data = [{"position": {"minX": xyxy[0], "minY": xyxy[1], "maxX": xyxy[2], "maxY": xyxy[3]},
+            #                  "class_id": int(cls),
+            #                  "box_caption": "%s %.3f" % (names[cls], conf),
+            #                  "scores": {"class_score": conf},
+            #                  "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
+            #     boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
+            #     wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
 
-            # # Append to pycocotools JSON dictionary
-            if config.TEST.SAVE_JSON:
-                # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
-                image_id = int(path.stem) if path.stem.isnumeric() else path.stem
-                box = xyxy2xywh(predn[:, :4])  # xywh
-                box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-                for p, b in zip(pred.tolist(), box.tolist()):
-                    jdict.append({'image_id': image_id,
-                                  'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
-                                  'bbox': [round(x, 3) for x in b],
-                                  'score': round(p[4], 5)})
+            # # # Append to pycocotools JSON dictionary
+            # if config.TEST.SAVE_JSON:
+            #     # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
+            #     image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+            #     box = xyxy2xywh(predn[:, :4])  # xywh
+            #     box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+            #     for p, b in zip(pred.tolist(), box.tolist()):
+            #         jdict.append({'image_id': image_id,
+            #                       'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
+            #                       'bbox': [round(x, 3) for x in b],
+            #                       'score': round(p[4], 5)})
 
         if config.TEST.PLOTS and batch_i < 3:
             if len(plot_masks):
                 plot_masks = torch.cat(plot_masks, dim=0)
-            # print("LABELS OUTPUT")
+
+            # print("\nLABELS OUTPUT")
             # print("Target:",target[2].shape)
             # print("Masks:",masks.shape)
             in_plot_images_and_masks(plt_img, target[2], masks, paths, save_dir + f'/val_batch{batch_i}_labels.jpg', in_names)
-            # print("PREDS OUTPUT")
+            # print("\nPREDS OUTPUT")
             # print("Target:",in_output_to_target(in_preds, max_det=15).shape)
             # print("Masks:",plot_masks.shape)
             in_plot_images_and_masks(plt_img, in_output_to_target(in_preds, max_det=15), plot_masks, paths,
-                                  save_dir + f'/val_batch{batch_i}_pred.jpg', in_names)  # pred
+                                save_dir + f'/val_batch{batch_i}_pred.jpg', in_names)  # pred
             
 
     # Compute statistics
@@ -533,6 +541,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
     pf = '%20s' + '%12.3g' * 6  # print format
     print(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
     in_pf = '%22s' + '%11i' * 2 + '%11.3g' * 8  # print format
+    print("\nINSTANCE SEGMENTATION")
     print(in_pf % ("all", seen, in_nt.sum(), *in_metrics.mean_results()))
     if in_nt.sum() == 0:
         print(f'WARNING: no labels found in val set, can not compute metrics without labels ⚠️')
@@ -544,6 +553,7 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
     if (verbose or (nc <= 20 and not training)) and nc > 1 and len(stats):
         for i, c in enumerate(ap_class):
             print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap[i]))
+        print("\nINSTANCE SEGMENTATION")
         for i, c in enumerate(in_metrics.ap_class_index):
             print(in_pf % (in_names[c], seen, in_nt[c], *in_metrics.class_result(i)))
 
@@ -562,33 +572,6 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
 
     mp_bbox, mr_bbox, map50_bbox, map_bbox, mp_mask, mr_mask, map50_mask, map_mask = in_metrics.mean_results()
 
-    # Save JSON
-    if config.TEST.SAVE_JSON and len(jdict):
-        w = Path(weights[0] if isinstance(weights, list) else weights).stem if weights is not None else ''  # weights
-        anno_json = '../coco/annotations/instances_val2017.json'  # annotations json
-        pred_json = str(save_dir / f"{w}_predictions.json")  # predictions json
-        print('\nEvaluating pycocotools mAP... saving %s...' % pred_json)
-        with open(pred_json, 'w') as f:
-            json.dump(jdict, f)
-
-        try:  # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
-            from pycocotools.coco import COCO
-            from pycocotools.cocoeval import COCOeval
-
-            anno = COCO(anno_json)  # init annotations api
-            pred = anno.loadRes(pred_json)  # init predictions api
-            eval = COCOeval(anno, pred, 'bbox')
-            results = []
-            if is_coco:
-                eval.params.imgIds = [int(Path(x).stem) for x in val_loader.dataset.img_files]  # image IDs to evaluate
-            eval.evaluate()
-            eval.accumulate()
-            eval.summarize()
-            map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
-            map_bbox, map50_bbox, map_mask, map50_mask = results
-        except Exception as e:
-            print(f'pycocotools unable to run: {e}')
-
     # Return results
     if not training:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if config.TEST.SAVE_TXT else ''
@@ -596,8 +579,8 @@ def validate(epoch,config, val_loader, model, criterion, output_dir,
     model.float()  # for training
     maps = np.zeros(nc) + map
     final_metric = mp_bbox, mr_bbox, map50_bbox, map_bbox, mp_mask, mr_mask, map50_mask, map_mask
-    for i, c in enumerate(ap_class):
-        maps[c] = ap[i]
+    # for i, c in enumerate(ap_class):
+    #     maps[c] = ap[i]
 
     ll_segment_result = (ll_acc_seg.avg,ll_IoU_seg.avg,ll_mIoU_seg.avg)
 

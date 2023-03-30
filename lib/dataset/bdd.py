@@ -7,7 +7,7 @@ from tqdm import tqdm
 from os.path import exists
 from ..core.general import segments2boxes
 
-single_cls = True       # just detect vehicle
+single_cls = False       # just detect vehicle
 
 class BddDataset(AutoDriveDataset):
     def __init__(self, cfg, is_train, inputsize, transform=None):
@@ -47,9 +47,9 @@ class BddDataset(AutoDriveDataset):
             gt = np.zeros((len(data), 5))
             for idx, obj in enumerate(data):
                 category = obj['category']
-                if category == "traffic light":
-                    color = obj['attributes']['trafficLightColor']
-                    category = "tl_" + color
+                # if category == "traffic light":
+                #     color = obj['attributes']['trafficLightColor']
+                #     category = "tl_" + color
                 if category in id_dict.keys():
                     x1 = float(obj['box2d']['x1'])
                     y1 = float(obj['box2d']['y1'])

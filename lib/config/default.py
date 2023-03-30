@@ -53,10 +53,10 @@ _C.LOSS.LL_IOU_GAIN = 0.2 # lane line iou loss gain
 
 # DATASET related params
 _C.DATASET = CN(new_allowed=True)
-_C.DATASET.DATAROOT = 'bdd_small_ditto/images'       # the path of images folder
-_C.DATASET.LABELROOT = 'bdd_small_ditto/det_annotations'      # the path of det_annotations folder
-_C.DATASET.LANEROOT = 'bdd_small_ditto/ll_seg_annotations'             # the path of ll_seg_annotations folder
-_C.DATASET.INS_MASKROOT = 'bdd_small_ditto/in_seg_annotations'        # the path of in_seg_annotations folder
+_C.DATASET.DATAROOT = 'bdd/images'       # the path of images folder
+_C.DATASET.LABELROOT = 'bdd/det_annotations'      # the path of det_annotations folder
+_C.DATASET.LANEROOT = 'bdd/ll_seg_annotations'             # the path of ll_seg_annotations folder
+_C.DATASET.INS_MASKROOT = 'bdd/in_seg_annotations'        # the path of in_seg_annotations folder
 _C.DATASET.DATASET = 'BddDataset'
 _C.DATASET.TRAIN_SET = 'train'
 _C.DATASET.TEST_SET = 'val'
@@ -108,7 +108,7 @@ _C.TRAIN.ANCHOR_THRESHOLD = 4.0
 # Alternating optimization
 _C.TRAIN.SEG_ONLY = False           # Only train two segmentation branchs
 _C.TRAIN.DET_ONLY = False           # Only train detection branch
-_C.TRAIN.ENC_SEG_ONLY = False       # Only train encoder and two segmentation branchs
+_C.TRAIN.ENC_SEG_ONLY = True       # Only train encoder and two segmentation branchs
 _C.TRAIN.ENC_DET_ONLY = False       # Only train encoder and detection branch
 _C.TRAIN.ENC_INS_SEG_ONLY = False      # Only train encoder + da ins segmentation task
 
@@ -128,7 +128,7 @@ _C.TEST.BATCH_SIZE_PER_GPU = 8
 _C.TEST.MODEL_FILE = ''
 _C.TEST.SAVE_JSON = False
 _C.TEST.SAVE_TXT = False
-_C.TEST.PLOTS = True
+_C.TEST.PLOTS = False
 _C.TEST.NMS_CONF_THRESHOLD  = 0.001
 _C.TEST.NMS_IOU_THRESHOLD  = 0.6
 

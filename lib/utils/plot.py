@@ -30,7 +30,6 @@ transform=transforms.Compose([
         ])
 
 
-
 def threaded(func):
     # Multi-threads a target function and returns thread. Usage: @threaded decorator
     def wrapper(*args, **kwargs):

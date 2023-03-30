@@ -110,6 +110,7 @@ def detect(cfg,opt):
         t3 = time_synchronized()
         det_pred = non_max_suppression(inf_out, conf_thres=opt.conf_thres, iou_thres=opt.iou_thres, classes=None, agnostic=False)
         in_pred = in_non_max_suppression(in_pred, opt.conf_thres, opt.iou_thres, None, False, max_det=300, nm=nm)
+
         t4 = time_synchronized()
 
         nms_time.update(t4-t3,img.size(0))
@@ -131,7 +132,7 @@ def detect(cfg,opt):
         ll_seg_mask = ll_seg_mask.int().squeeze().cpu().numpy()
 
         ll_seg = ll_seg_mask.shape
-        # img_det = show_seg_result(img_det, ll_seg_mask, _, _, is_demo=True)
+        img_det = show_seg_result(img_det, ll_seg_mask, _, _, is_demo=True)
 
         if len(det):
             det[:,:4] = scale_coords(img.shape[2:],det[:,:4],img_det.shape).round()
